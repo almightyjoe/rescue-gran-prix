@@ -623,7 +623,7 @@
   }
 
   function normalizedPlayerName() {
-    return (els.playerName.value || "Player 1").trim().slice(0, 18) || "Player 1";
+    return els.playerName.value.trim().slice(0, 18) || "Driver";
   }
 
   function randomLobbyCode() {
