@@ -57,12 +57,12 @@ For full-system testing from this computer, including the shared lobby backend:
 npm start
 ```
 
-The server starts at port `8787` by default. If that port is already in use, it automatically tries the next ports and prints the actual URL.
+The server starts at port `3040` by default. If that port is already in use, it automatically tries the next ports and prints the actual URL.
 
 Then open the URL printed by the server. Common examples:
 
-- Same computer: `http://127.0.0.1:8787/`
-- Other devices on the same network: `http://COMPUTER_LAN_IP:8787/`
+- Same computer: `http://127.0.0.1:3040/`
+- Other devices on the same network: `http://COMPUTER_LAN_IP:3040/`
 
 If other devices cannot connect, allow Node.js through the local firewall for private networks.
 
@@ -73,11 +73,11 @@ The Pi hosts the entire system: static frontend files, question data, and lobby 
 1. Install Node.js 20 or newer on the Pi.
 2. Copy or clone this repository onto the Pi.
 3. From the project directory, run `npm start`.
-4. Visit `http://PI_IP_ADDRESS:8787/` from devices on the same network.
+4. Visit `http://PI_IP_ADDRESS:3040/` from devices on the same network.
 
 Optional environment variables:
 
-- `PORT=8787` sets the first port to try.
+- `PORT=3040` sets the first port to try.
 - `PORT_ATTEMPTS=25` sets how many sequential ports the server may try before failing.
 - `HOST=0.0.0.0` controls which network interface the server binds to.
 - `LOBBY_TTL_MS=21600000` controls how long inactive lobbies stay listed.
@@ -88,7 +88,7 @@ This server keeps lobby state in memory. Restarting the Pi or server clears open
 
 The production target is still one Raspberry Pi 5. The recommended internet-facing setup is to run the Node app and the HTTPS reverse proxy on that same Pi.
 
-Do not expose the raw Node app directly as the public internet endpoint unless this is a temporary private test. Keep the app listening internally on `127.0.0.1:8787` or the Pi's LAN address, then put a reverse proxy in front of it if you need TLS.
+Do not expose the raw Node app directly as the public internet endpoint unless this is a temporary private test. Keep the app listening internally on `127.0.0.1:3040` or the Pi's LAN address, then put a reverse proxy in front of it if you need TLS.
 
 Recommended home-hosted shape:
 
@@ -96,14 +96,14 @@ Recommended home-hosted shape:
 2. Choose an available public port for your router and reverse proxy.
 3. Forward that public port on the router to the Pi.
 4. Run a reverse proxy such as Caddy or Nginx on the same Pi if TLS is required.
-5. Proxy public traffic to `http://127.0.0.1:8787`.
+5. Proxy public traffic to `http://127.0.0.1:3040`.
 6. Keep the Node app managed by `systemd` or another process supervisor.
 
 Example Caddyfile:
 
 ```text
 :YOUR_PUBLIC_PORT {
-  reverse_proxy 127.0.0.1:8787
+  reverse_proxy 127.0.0.1:3040
 }
 ```
 
@@ -119,7 +119,7 @@ WorkingDirectory=/opt/rescue-gran-prix
 ExecStart=/usr/bin/npm start
 Restart=always
 Environment=HOST=127.0.0.1
-Environment=PORT=8787
+Environment=PORT=3040
 
 [Install]
 WantedBy=multi-user.target

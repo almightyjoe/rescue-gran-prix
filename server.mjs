@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const host = process.env.HOST || "0.0.0.0";
-const preferredPort = Number(process.env.PORT || 8787);
+const preferredPort = Number(process.env.PORT || 3040);
 const maxPortAttempts = Number(process.env.PORT_ATTEMPTS || 25);
 const lobbyTtlMs = Number(process.env.LOBBY_TTL_MS || 6 * 60 * 60 * 1000);
 const lobbies = new Map();
