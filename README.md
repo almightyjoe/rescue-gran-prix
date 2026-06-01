@@ -35,7 +35,9 @@ Standalone static website that merges the Math Gran Prix racing shell with the T
 
 ## Lobby Scope
 
-The current lobby registry is stored in each browser's local storage. Race codes and available races are visible across tabs/windows on the same device, but not across separate devices. Cross-device lobbies require a shared realtime service such as Supabase Realtime, Firebase, or a small custom WebSocket/API backend.
+When opened from GitHub Pages or a local file, the lobby registry is stored in each browser's local storage. Race codes and available races are visible across tabs/windows on the same device, but not across separate devices.
+
+For cross-device play, run the included Node server. It serves the same static files and exposes a same-origin lobby API at `/api/lobbies`, so phones, tablets, and laptops connected to the same server share race codes, lobby membership, and ready state.
 
 ## Question Source
 
@@ -48,6 +50,29 @@ Only the question bank is used. Backend analytics, learner tracking, authenticat
 ## Run Locally
 
 Open `index.html` in a browser, or serve the folder with any static file server.
+
+For cross-device lobby testing on a LAN:
+
+```powershell
+npm start
+```
+
+Then open `http://SERVER_IP:8080/` from each device.
+
+## Raspberry Pi 5 Hosting
+
+1. Install Node.js 20 or newer on the Pi.
+2. Copy or clone this repository onto the Pi.
+3. From the project directory, run `npm start`.
+4. Visit `http://PI_IP_ADDRESS:8080/` from devices on the same network.
+
+Optional environment variables:
+
+- `PORT=8080` changes the server port.
+- `HOST=0.0.0.0` controls which network interface the server binds to.
+- `LOBBY_TTL_MS=21600000` controls how long inactive lobbies stay listed.
+
+This server keeps lobby state in memory. Restarting the Pi or server clears open lobbies, which is acceptable for race setup state. If the project later needs internet-scale availability, the same `/api/lobbies` contract can move to a persistent service such as Supabase, Firebase, Redis, or a hosted Node service.
 
 ## GitHub Pages
 

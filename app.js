@@ -9,6 +9,7 @@
   const PLACEMENT_BONUS = [15, 8, 4, 0];
   const HAZARD_KEYS = ["spinner", "skipper", "sinker", "steps"];
   const LOBBY_STORAGE_KEY = "rescue-gran-prix-lobbies-v1";
+  const LOBBY_API_URL = "./api/lobbies";
   const HAZARD_INFO = {
     spinner: {
       label: "Spinner",
@@ -284,6 +285,13 @@
     track: buildTrackInstance("classic"),
   };
 
+  const lobbySync = {
+    remote: false,
+    checked: false,
+    registry: {},
+    lastError: "",
+  };
+
   const els = {
     playerName: document.querySelector("#player-name"),
     joinCode: document.querySelector("#join-code"),
@@ -517,6 +525,8 @@
         render();
       }
     });
+
+    initRemoteLobbySync();
   }
 
   function initLobbyFieldsFromUrl() {
@@ -527,7 +537,8 @@
     if (name) els.playerName.value = name;
   }
 
-  function createLobby() {
+  async function createLobby() {
+    await refreshRemoteLobbies();
     const name = normalizedPlayerName();
     const code = normalizedLobbyCode() || randomLobbyCode();
     if (readLobby(code)) {
@@ -556,7 +567,8 @@
     render();
   }
 
-  function joinLobby() {
+  async function joinLobby() {
+    await refreshRemoteLobbies();
     const code = normalizedLobbyCode();
     const localName = normalizedPlayerName();
     if (!code) {
@@ -655,6 +667,9 @@
   }
 
   function readLobbyRegistry() {
+    if (lobbySync.remote) {
+      return lobbySync.registry;
+    }
     try {
       const parsed = JSON.parse(localStorage.getItem(LOBBY_STORAGE_KEY) || "{}");
       return parsed && typeof parsed === "object" ? parsed : {};
@@ -664,6 +679,9 @@
   }
 
   function writeLobbyRegistry(registry) {
+    if (lobbySync.remote) {
+      lobbySync.registry = registry;
+    }
     try {
       localStorage.setItem(LOBBY_STORAGE_KEY, JSON.stringify(registry));
     } catch {
@@ -676,17 +694,68 @@
     return lobby && Array.isArray(lobby.players) ? lobby : null;
   }
 
+  function initRemoteLobbySync() {
+    refreshRemoteLobbies();
+    window.setInterval(refreshRemoteLobbies, 1600);
+  }
+
+  async function refreshRemoteLobbies() {
+    try {
+      const response = await fetch(LOBBY_API_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Lobby API returned ${response.status}`);
+      const payload = await response.json();
+      lobbySync.remote = true;
+      lobbySync.checked = true;
+      lobbySync.lastError = "";
+      lobbySync.registry = payload && payload.lobbies && typeof payload.lobbies === "object"
+        ? payload.lobbies
+        : {};
+
+      if (state.lobby.active && (state.phase === "setup" || state.phase === "lobby")) {
+        const latest = readLobby(state.lobby.code);
+        if (latest) {
+          loadLobby(latest);
+          rebuildDriverConfig();
+        }
+      }
+      render();
+    } catch (error) {
+      lobbySync.checked = true;
+      lobbySync.lastError = error && error.message ? error.message : "Lobby API unavailable";
+    }
+  }
+
+  async function persistRemoteLobby(lobby) {
+    if (!lobbySync.remote || !lobby || !lobby.code) return;
+    try {
+      const response = await fetch(`${LOBBY_API_URL}/${encodeURIComponent(lobby.code)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lobby),
+      });
+      if (!response.ok) throw new Error(`Lobby save returned ${response.status}`);
+      const payload = await response.json();
+      if (payload && payload.lobbies && typeof payload.lobbies === "object") {
+        lobbySync.registry = payload.lobbies;
+      }
+    } catch (error) {
+      lobbySync.lastError = error && error.message ? error.message : "Lobby save failed";
+    }
+  }
+
   function saveCurrentLobby() {
     if (!state.lobby.active || !state.lobby.code) return;
     const registry = readLobbyRegistry();
-    registry[state.lobby.code] = {
+    const savedLobby = {
       ...state.lobby,
       updatedAt: Date.now(),
       config: { ...state.config },
       trackKey: state.track.templateKey,
       hazards: cloneHazards(state.track.hazards),
     };
+    registry[state.lobby.code] = savedLobby;
     writeLobbyRegistry(registry);
+    persistRemoteLobby(savedLobby);
   }
 
   function loadLobby(lobby) {
@@ -1422,9 +1491,10 @@
   function renderLobby() {
     els.lobbyCode.textContent = state.lobby.code || "No Race";
     const readyCount = state.lobby.players.filter((player) => player.readyVersion === state.lobby.configVersion).length;
+    const scope = lobbySync.remote ? "server lobby" : "this device only";
     els.lobbyStatus.textContent = state.lobby.active
-      ? `${readyCount}/${state.lobby.players.length} ready`
-      : "Create or join a race lobby.";
+      ? `${readyCount}/${state.lobby.players.length} ready | ${scope}`
+      : `Create or join a race lobby. Scope: ${scope}.`;
     els.readyRaceBtn.disabled = !state.lobby.active;
     const localPlayer = localLobbyPlayer();
     els.readyRaceBtn.textContent = localPlayer && localPlayer.readyVersion === state.lobby.configVersion
@@ -1445,7 +1515,7 @@
           </button>
         `;
       }).join("")
-      : `<div class="info-card muted">No races are currently posted in this browser.</div>`;
+      : `<div class="info-card muted">No races are currently posted ${lobbySync.remote ? "on this server" : "in this browser"}.</div>`;
     els.availableLobbies.querySelectorAll(".available-lobby").forEach((button) => {
       const join = () => {
         els.joinCode.value = button.dataset.code;
