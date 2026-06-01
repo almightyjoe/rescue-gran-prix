@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rescue Gran Prix</title>
+  <link rel="stylesheet" href="./styles.css?v=20260530-layout">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Browser Racing EMT Training Game</p>
+        <h1>Rescue Gran Prix</h1>
+      </div>
+      <section class="panel prompt-panel">
+        <div class="panel-header compact">
+          <h2 id="prompt-title">Ready</h2>
+        </div>
+        <div id="prompt-body" class="prompt-body"></div>
+        <div id="move-controls" class="move-controls"></div>
+        <div id="answer-controls" class="answer-controls"></div>
+      </section>
+      <div class="topbar-actions">
+        <button id="new-race-btn" class="ghost-btn">New Race</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel lobby-panel">
+        <div class="panel-header">
+          <h2>Race Lobby</h2>
+          <p>Create a race, invite players, and start when everyone is ready.</p>
+        </div>
+
+        <div class="lobby-grid">
+          <label>
+            <span>Player Name</span>
+            <input id="player-name" maxlength="18" spellcheck="false" value="Player 1">
+          </label>
+          <label>
+            <span>Race Code</span>
+            <input id="join-code" maxlength="8" spellcheck="false" placeholder="ABC123">
+          </label>
+        </div>
+
+        <div class="setup-actions">
+          <button id="create-race-btn" class="primary-btn">Create Race</button>
+          <button id="join-race-btn" class="ghost-btn">Join Race</button>
+          <button id="ready-race-btn" class="ghost-btn">Ready</button>
+        </div>
+
+        <div class="lobby-summary">
+          <div class="info-card">
+            <strong id="lobby-code">No Race</strong>
+            <div class="muted" id="lobby-status">Create or join a race lobby.</div>
+          </div>
+          <div class="available-lobbies-wrap">
+            <h3>Available Races</h3>
+            <div id="available-lobbies" class="available-lobbies"></div>
+          </div>
+          <div id="lobby-players" class="lobby-players"></div>
+        </div>
+      </section>
+
+      <section class="panel setup-panel">
+        <div class="panel-header">
+          <h2>Race Setup</h2>
+          <p>Choose drivers, an EMT question set, and a race map.</p>
+        </div>
+
+        <div class="setup-grid">
+          <label>
+            <span>Total Drivers</span>
+            <select id="player-count"></select>
+          </label>
+          <label>
+            <span>Human Drivers</span>
+            <select id="human-count"></select>
+          </label>
+          <label>
+            <span>Question Set</span>
+            <select id="mode-select"></select>
+          </label>
+          <label>
+            <span>Track Layout</span>
+            <select id="track-select"></select>
+          </label>
+          <label>
+            <span>Theme</span>
+            <select id="theme-select">
+              <option value="sand">Sand</option>
+              <option value="midnight">Midnight</option>
+              <option value="forest">Forest</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="driver-config" class="driver-config"></div>
+
+        <div class="setup-actions">
+          <button id="start-race-btn" class="primary-btn">Start Race</button>
+          <button id="randomize-track-btn" class="ghost-btn">Randomize Hazards</button>
+        </div>
+      </section>
+
+      <section class="panel board-panel">
+        <div class="panel-header">
+          <h2>Track View</h2>
+          <p>Pick a distance, answer the EMT question, and race through hazards.</p>
+        </div>
+        <div id="board-stage" class="board-stage"></div>
+        <section class="map-hazard-panel">
+          <h2>Hazards</h2>
+          <div id="hazard-legend" class="hazard-legend"></div>
+        </section>
+      </section>
+
+      <aside class="sidebar">
+        <section class="panel status-panel">
+          <div class="panel-header compact">
+            <h2>Race Control</h2>
+          </div>
+          <div id="status-summary" class="status-summary"></div>
+        </section>
+
+        <section class="panel roster-panel">
+          <div class="panel-header compact">
+            <h2>Drivers</h2>
+          </div>
+          <div id="driver-roster" class="driver-roster"></div>
+        </section>
+
+        <section class="panel results-panel">
+          <div class="panel-header compact">
+            <h2>Race Results</h2>
+          </div>
+          <div id="results-body" class="results-body"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <template id="driver-config-template">
+    <div class="driver-card">
+      <div class="driver-card-top">
+        <div class="swatch"></div>
+        <strong class="driver-name"></strong>
+      </div>
+      <label>
+        <span>Initials</span>
+        <input class="driver-initials" maxlength="3" spellcheck="false">
+      </label>
+      <label>
+        <span>Timed?</span>
+        <input class="driver-timed" type="checkbox">
+      </label>
+      <label>
+        <span>Controller</span>
+        <select class="driver-controller">
+          <option value="human">Human</option>
+          <option value="ai">AI</option>
+        </select>
+      </label>
+    </div>
+  </template>
+
+  <script src="./questions.js?v=20260601-rescue"></script>
+  <script src="./app.js?v=20260601-rescue"></script>
+</body>
+</html>
