@@ -74,6 +74,50 @@ Optional environment variables:
 
 This server keeps lobby state in memory. Restarting the Pi or server clears open lobbies, which is acceptable for race setup state. If the project later needs internet-scale availability, the same `/api/lobbies` contract can move to a persistent service such as Supabase, Firebase, Redis, or a hosted Node service.
 
+## Internet Hosting
+
+Do not expose the raw Node app directly as the public internet endpoint. Keep the app listening internally on `127.0.0.1:8080` or the Pi's LAN address, then put HTTPS in front of it.
+
+Recommended home-hosted shape:
+
+1. Point a domain or dynamic DNS hostname at your home IP.
+2. Forward public port `443` on the router to the Pi.
+3. Run a reverse proxy such as Caddy or Nginx on the Pi.
+4. Proxy public HTTPS traffic to `http://127.0.0.1:8080`.
+5. Keep the Node app managed by `systemd` or another process supervisor.
+
+Example Caddyfile:
+
+```text
+rescue.example.com {
+  reverse_proxy 127.0.0.1:8080
+}
+```
+
+Example systemd service:
+
+```ini
+[Unit]
+Description=Rescue Gran Prix
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/rescue-gran-prix
+ExecStart=/usr/bin/npm start
+Restart=always
+Environment=HOST=127.0.0.1
+Environment=PORT=8080
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Scalability path:
+
+- Home/LAN or small internet use: included Node server with in-memory lobbies.
+- More reliable home hosting: add a small persistent store such as SQLite or Redis on the Pi.
+- Internet-scale or mobile users across networks: move lobby state to Supabase Realtime, Firebase, Redis, or a hosted Node/WebSocket service while keeping the same frontend lobby API shape.
+
 ## GitHub Pages
 
 This project can be published directly from the repository root on the `main` branch. It does not need server storage unless shared all-time high scores, online multiplayer, accounts, or centralized learner analytics are added later.
