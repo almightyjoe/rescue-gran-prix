@@ -48,6 +48,7 @@
   ];
 
   const COURSE_MODULES = [
+    { slug: "all", name: "All Questions", all: true },
     { slug: "pharmacology-emt", name: "Pharmacology & Oxygen" },
     { slug: "respiratory-emergencies", name: "Respiratory Emergencies" },
     { slug: "neurology-stroke", name: "Neurology & Stroke" },
@@ -260,7 +261,7 @@
     config: {
       players: 2,
       humans: 1,
-      mode: 7,
+      mode: 1,
       theme: "sand",
       track: "classic",
     },
@@ -453,7 +454,7 @@
     for (let value = 1; value <= 4; value += 1) {
       els.humanCount.append(new Option(String(value), String(value)));
     }
-    for (let value = 1; value <= 9; value += 1) {
+    for (let value = 1; value <= COURSE_MODULES.length; value += 1) {
       els.modeSelect.append(new Option(`${value}: ${MODE_NAMES[value]}`, String(value)));
     }
     Object.entries(TRACK_LAYOUTS).forEach(([key, layout]) => {
@@ -843,16 +844,17 @@
   }
 
   function difficultyForMove(player, spaces, repair) {
-    const baseDifficulty = (state.config.mode - 1) % 3;
     if (repair) return 0;
-    return clamp(baseDifficulty + (player.score > 18 ? 1 : 0) + (spaces - 1), 0, 4);
+    return clamp((player.score > 18 ? 1 : 0) + (spaces - 1), 0, 4);
   }
 
   function generateQuestion(player, spaces, repair = false) {
     const difficulty = difficultyForMove(player, spaces, repair);
     const selectedModule = COURSE_MODULES[state.config.mode - 1] || COURSE_MODULES[0];
     const allQuestions = Array.isArray(window.RESCUE_QUESTIONS) ? window.RESCUE_QUESTIONS : [];
-    const moduleQuestions = allQuestions.filter((question) => question.moduleSlug === selectedModule.slug);
+    const moduleQuestions = selectedModule.all
+      ? allQuestions
+      : allQuestions.filter((question) => question.moduleSlug === selectedModule.slug);
     const exactDifficulty = moduleQuestions.filter((question) => question.difficulty === difficulty + 1);
     const nearbyDifficulty = moduleQuestions.filter((question) => question.difficulty <= difficulty + 1);
     const fallbackQuestions = moduleQuestions.length ? moduleQuestions : allQuestions;

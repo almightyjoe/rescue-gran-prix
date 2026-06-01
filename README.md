@@ -18,7 +18,8 @@ Standalone static website that merges the Math Gran Prix racing shell with the T
 - Browser-side lobby flow with race codes, player roster, and ready checks
 - Configuration changes reset player readiness before the race can start
 - EMT multiple-choice questions from the Trinidad EMS training app
-- Nine selectable question sets:
+- Ten selectable question sets:
+  - All Questions
   - Pharmacology & Oxygen
   - Respiratory Emergencies
   - Neurology & Stroke
@@ -31,6 +32,10 @@ Standalone static website that merges the Math Gran Prix racing shell with the T
 - Eight selectable SVG race maps with distinct scenery
 - Randomized hazard placement and hazard types on the selected map
 - Session-only final standings
+
+## Lobby Scope
+
+The current lobby registry is stored in each browser's local storage. Race codes and available races are visible across tabs/windows on the same device, but not across separate devices. Cross-device lobbies require a shared realtime service such as Supabase Realtime, Firebase, or a small custom WebSocket/API backend.
 
 ## Question Source
 
