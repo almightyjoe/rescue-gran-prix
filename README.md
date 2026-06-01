@@ -51,15 +51,22 @@ Only the question bank is used. Backend analytics, learner tracking, authenticat
 
 Open `index.html` in a browser, or serve the folder with any static file server.
 
-For cross-device lobby testing on a LAN:
+For full-system testing from this computer, including the shared lobby backend:
 
 ```powershell
 npm start
 ```
 
-Then open `http://SERVER_IP:8080/` from each device.
+Then open:
+
+- Same computer: `http://127.0.0.1:8080/`
+- Other devices on the same network: `http://COMPUTER_LAN_IP:8080/`
+
+If other devices cannot connect, allow Node.js through the local firewall for private networks.
 
 ## Raspberry Pi 5 Hosting
+
+The Pi hosts the entire system: static frontend files, question data, and lobby backend.
 
 1. Install Node.js 20 or newer on the Pi.
 2. Copy or clone this repository onto the Pi.
@@ -76,13 +83,15 @@ This server keeps lobby state in memory. Restarting the Pi or server clears open
 
 ## Internet Hosting
 
-Do not expose the raw Node app directly as the public internet endpoint. Keep the app listening internally on `127.0.0.1:8080` or the Pi's LAN address, then put HTTPS in front of it.
+The production target is still one Raspberry Pi 5. The recommended internet-facing setup is to run the Node app and the HTTPS reverse proxy on that same Pi.
+
+Do not expose the raw Node app directly as the public internet endpoint unless this is a temporary private test. Keep the app listening internally on `127.0.0.1:8080` or the Pi's LAN address, then put HTTPS in front of it.
 
 Recommended home-hosted shape:
 
 1. Point a domain or dynamic DNS hostname at your home IP.
 2. Forward public port `443` on the router to the Pi.
-3. Run a reverse proxy such as Caddy or Nginx on the Pi.
+3. Run a reverse proxy such as Caddy or Nginx on the same Pi.
 4. Proxy public HTTPS traffic to `http://127.0.0.1:8080`.
 5. Keep the Node app managed by `systemd` or another process supervisor.
 
