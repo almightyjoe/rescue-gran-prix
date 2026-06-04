@@ -1,22 +1,24 @@
 # Rescue Gran Prix
 
-Standalone static website that merges the Math Gran Prix racing shell with the Trinidad EMS training question banks.
+Version 1.0.0 of a browser racing EMT training game with a Node.js lobby server for shared race codes, live roster sync, shared questions, and multiplayer turn control.
 
 ## Website Shape
 
 - Plain `HTML`, `CSS`, and `JavaScript`
 - No framework
 - No build step
-- No backend service
-- GitHub Pages compatible
-- Results are kept only for the current browser session
+- Node.js lobby backend for multiplayer sessions
+- No framework or build step
+- Static frontend served by the included server
+- Local race state synchronized through the server API and live event stream
 
 ## Included
 
-- Local browser gameplay for two to four drivers
+- Browser gameplay for two to eight drivers
 - Human and AI drivers
-- Browser-side lobby flow with race codes, player roster, and ready checks
-- Configuration changes reset player readiness before the race can start
+- Shared lobby flow with race codes and player roster
+- Joined players are automatically assigned to human driver slots
+- Host-controlled setup, map, hazards, and race start
 - EMT multiple-choice questions from the Trinidad EMS training app
 - Ten selectable question sets:
   - All Questions
@@ -31,13 +33,12 @@ Standalone static website that merges the Math Gran Prix racing shell with the T
   - EMS Operations
 - Eight selectable SVG race maps with distinct scenery
 - Randomized hazard placement and hazard types on the selected map
-- Session-only final standings
+- Shared question, answer, review, standings, and race feed state
+- Optional Raspberry Pi desktop widget for service and lobby administration
 
 ## Lobby Scope
 
-When opened from GitHub Pages or a local file, the lobby registry is stored in each browser's local storage. Race codes and available races are visible across tabs/windows on the same device, but not across separate devices.
-
-For cross-device play, run the included Node server. It serves the same static files and exposes a same-origin lobby API at `/api/lobbies`, so phones, tablets, and laptops connected to the same server share race codes, lobby membership, and ready state.
+Run the included Node server. It serves the static app and exposes same-origin APIs under `/api/lobbies`, plus a live stream at `/api/stream`, so phones, tablets, and laptops connected to the same server share race codes, lobby membership, setup, questions, answers, review state, and race progress.
 
 ## Question Source
 
@@ -49,9 +50,7 @@ Only the question bank is used. Backend analytics, learner tracking, authenticat
 
 ## Run Locally
 
-Open `index.html` in a browser, or serve the folder with any static file server.
-
-For full-system testing from this computer, including the shared lobby backend:
+Install Node.js 20 or newer, then start the server:
 
 ```powershell
 npm start
@@ -75,7 +74,11 @@ The Pi hosts the entire system: static frontend files, question data, and lobby 
 3. From the project directory, run `npm start`.
 4. Visit `http://PI_IP_ADDRESS:3040/` from devices on the same network.
 
-Optional environment variables:
+## Desktop Widget
+
+The optional Raspberry Pi desktop widget lives in `desktop-widget/`. It can show service status, open the local app, list/delete races, kick players, clear stuck race state, and restart the service.
+
+## Optional environment variables
 
 - `PORT=3040` sets the first port to try.
 - `PORT_ATTEMPTS=25` sets how many sequential ports the server may try before failing.

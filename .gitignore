@@ -1,0 +1,9 @@
+.codex
+kinetix2/
+kinetix2-required-files.zip
+__pycache__/
+*.py[cod]
+desktop-widget/__pycache__/
+desktop-widget/*.log
+node_modules/
+.env

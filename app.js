@@ -4,12 +4,22 @@
   const TRACK_LENGTH = 30;
   const FINISH_INDEX = TRACK_LENGTH - 1;
   const FIRST_CROSSING_INDEX = 6;
+  const MAX_PLAYERS = 8;
   const MOVE_OPTIONS = [1, 2, 3];
   const DIFFICULTY_POINTS = [1, 2, 3, 4, 5];
   const PLACEMENT_BONUS = [15, 8, 4, 0];
-  const HAZARD_KEYS = ["spinner", "skipper", "sinker", "steps"];
+  const HAZARD_KEYS = ["spinner", "skipper", "sinker", "steps", "oil", "redflag"];
   const LOBBY_STORAGE_KEY = "rescue-gran-prix-lobbies-v1";
+  const CLIENT_ID_STORAGE_KEY = "rescue-gran-prix-client-id-v1";
   const LOBBY_API_URL = "./api/lobbies";
+  const LOBBY_STREAM_URL = "./api/stream";
+  const APP_META = {
+    release: "1.0.0",
+    revision: "working",
+    updatedOn: "2026-06-04",
+    label: "Remote multiplayer build",
+    note: "Questions, answers, and review state are shared across both racers.",
+  };
   const HAZARD_INFO = {
     spinner: {
       label: "Spinner",
@@ -38,6 +48,20 @@
       color: "#ffb057",
       effect: "Only 3-space moves until the finish.",
       icon: "stairs",
+    },
+    oil: {
+      label: "Oil Slick",
+      short: "O",
+      color: "#8d98ad",
+      effect: "Slide 2 spaces, then lose your next turn in the grass.",
+      icon: "oil",
+    },
+    redflag: {
+      label: "Red Flag",
+      short: "R",
+      color: "#e56b64",
+      effect: "Lose your next turn.",
+      icon: "redflag",
     },
   };
 
@@ -270,6 +294,7 @@
     lobby: {
       active: false,
       code: "",
+      revision: 0,
       configVersion: 0,
       players: [],
     },
@@ -283,6 +308,9 @@
     placements: [],
     lastRace: [],
     track: buildTrackInstance("classic"),
+    review: null,
+    activityLog: [],
+    adminOpen: false,
   };
 
   const lobbySync = {
@@ -290,6 +318,8 @@
     checked: false,
     registry: {},
     lastError: "",
+    lastSyncAt: 0,
+    stream: null,
   };
 
   const els = {
@@ -297,7 +327,10 @@
     joinCode: document.querySelector("#join-code"),
     createRaceBtn: document.querySelector("#create-race-btn"),
     joinRaceBtn: document.querySelector("#join-race-btn"),
-    readyRaceBtn: document.querySelector("#ready-race-btn"),
+    adminToggleBtn: document.querySelector("#admin-toggle-btn"),
+    releaseNote: document.querySelector("#release-note"),
+    adminPanel: document.querySelector("#admin-panel"),
+    closeRaceBtn: document.querySelector("#close-race-btn"),
     lobbyCode: document.querySelector("#lobby-code"),
     lobbyStatus: document.querySelector("#lobby-status"),
     lobbyPlayers: document.querySelector("#lobby-players"),
@@ -314,12 +347,9 @@
     boardStage: document.querySelector("#board-stage"),
     statusSummary: document.querySelector("#status-summary"),
     driverRoster: document.querySelector("#driver-roster"),
-    promptTitle: document.querySelector("#prompt-title"),
-    promptBody: document.querySelector("#prompt-body"),
-    moveControls: document.querySelector("#move-controls"),
-    answerControls: document.querySelector("#answer-controls"),
+    activityFeed: document.querySelector("#activity-feed"),
     hazardLegend: document.querySelector("#hazard-legend"),
-    resultsBody: document.querySelector("#results-body"),
+    raceConsole: document.querySelector("#race-console"),
     driverTemplate: document.querySelector("#driver-config-template"),
   };
 
@@ -393,10 +423,11 @@
     return Math.hypot(b[0] - a[0], b[1] - a[1]);
   }
 
-  function buildTrackInstance(layoutKey) {
+  function buildTrackInstance(layoutKey, preferredTemplateKey = "") {
     const family = TRACK_LAYOUTS[layoutKey].family;
     const templates = TRACK_LIBRARY[family];
-    const template = templates[randInt(0, templates.length - 1)];
+    const template = templates.find((entry) => entry.key === preferredTemplateKey)
+      || templates[randInt(0, templates.length - 1)];
     const hazards = randomizeHazards(template.hazardCandidates);
     return {
       layoutKey,
@@ -414,6 +445,9 @@
     state.track.hazards = randomizeHazards([...state.track.hazardCandidates]);
     invalidateLobbyReady();
     state.feedback = `Hazards randomized on ${TRACK_LAYOUTS[state.config.track].name}.`;
+    if (state.lobby.active && lobbySync.remote) {
+      syncLobbySetup().catch((error) => showError(error.message));
+    }
     render();
   }
 
@@ -451,15 +485,23 @@
   }
 
   function getClientId() {
-    return `player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const saved = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+      if (saved) return saved;
+      const created = `player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
+      return created;
+    } catch {
+      return `player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    }
   }
 
   function initControls() {
     initLobbyFieldsFromUrl();
-    for (let value = 2; value <= 4; value += 1) {
+    for (let value = 2; value <= MAX_PLAYERS; value += 1) {
       els.playerCount.append(new Option(String(value), String(value)));
     }
-    for (let value = 1; value <= 4; value += 1) {
+    for (let value = 1; value <= MAX_PLAYERS; value += 1) {
       els.humanCount.append(new Option(String(value), String(value)));
     }
     for (let value = 1; value <= COURSE_MODULES.length; value += 1) {
@@ -477,23 +519,32 @@
 
     els.playerCount.addEventListener("change", () => {
       state.config.players = Number(els.playerCount.value);
-      state.config.humans = clamp(state.config.humans, 1, state.config.players);
+      state.config.humans = clamp(state.config.humans, minimumHumanDrivers(), state.config.players);
       els.humanCount.value = String(state.config.humans);
       invalidateLobbyReady();
       rebuildDriverConfig();
+      if (state.lobby.active && lobbySync.remote) {
+        syncLobbySetup().catch((error) => showError(error.message));
+      }
       render();
     });
 
     els.humanCount.addEventListener("change", () => {
-      state.config.humans = clamp(Number(els.humanCount.value), 1, state.config.players);
+      state.config.humans = clamp(Number(els.humanCount.value), minimumHumanDrivers(), state.config.players);
       invalidateLobbyReady();
       rebuildDriverConfig();
+      if (state.lobby.active && lobbySync.remote) {
+        syncLobbySetup().catch((error) => showError(error.message));
+      }
       render();
     });
 
     els.modeSelect.addEventListener("change", () => {
       state.config.mode = Number(els.modeSelect.value);
       invalidateLobbyReady();
+      if (state.lobby.active && lobbySync.remote) {
+        syncLobbySetup().catch((error) => showError(error.message));
+      }
       render();
     });
 
@@ -501,6 +552,9 @@
       state.config.track = els.trackSelect.value;
       state.track = buildTrackInstance(state.config.track);
       invalidateLobbyReady();
+      if (state.lobby.active && lobbySync.remote) {
+        syncLobbySetup().catch((error) => showError(error.message));
+      }
       render();
     });
 
@@ -508,22 +562,28 @@
       state.config.theme = els.themeSelect.value;
       invalidateLobbyReady();
       applyTheme();
+      if (state.lobby.active && lobbySync.remote) {
+        syncLobbySetup().catch((error) => showError(error.message));
+      }
       render();
     });
 
     els.createRaceBtn.addEventListener("click", createLobby);
     els.joinRaceBtn.addEventListener("click", joinLobby);
-    els.readyRaceBtn.addEventListener("click", toggleReady);
+    els.adminToggleBtn.addEventListener("click", toggleAdminPanel);
     els.startRaceBtn.addEventListener("click", startRace);
     els.newRaceBtn.addEventListener("click", resetToSetup);
     els.randomizeTrackBtn.addEventListener("click", randomizeCurrentTrack);
+    els.closeRaceBtn.addEventListener("click", closeCurrentRace);
     window.addEventListener("storage", (event) => {
-      if (event.key !== LOBBY_STORAGE_KEY || !state.lobby.active) return;
+      if (event.key !== LOBBY_STORAGE_KEY) return;
       const latest = readLobby(state.lobby.code);
       if (latest) {
         loadLobby(latest);
         render();
+        return;
       }
+      render();
     });
 
     initRemoteLobbySync();
@@ -539,36 +599,38 @@
 
   async function createLobby() {
     await refreshRemoteLobbies();
-    const name = normalizedPlayerName();
-    const code = normalizedLobbyCode() || randomLobbyCode();
-    if (readLobby(code)) {
-      state.feedback = `Race ${code} already exists. Join it or choose another code.`;
+    if (!lobbySync.remote) {
+      state.feedback = "The game server is unavailable. This release build requires the Rescue Gran Prix server.";
       render();
       return;
     }
-    state.lobby = {
-      active: true,
-      code,
-      configVersion: 1,
-      players: [
-        {
-          id: state.clientId,
-          name,
-          readyVersion: 0,
-          host: true,
-        },
-      ],
-    };
-    state.phase = "setup";
-    syncConfigToLobby();
-    saveCurrentLobby();
-    state.feedback = `${name} created race ${state.lobby.code}.`;
-    rebuildDriverConfig();
-    render();
+    const name = normalizedPlayerName();
+    const requestedCode = normalizedLobbyCode();
+    const code = requestedCode && requestedCode !== state.lobby.code ? requestedCode : randomLobbyCode();
+    try {
+      state.track = buildTrackInstance(state.config.track);
+      await postLobbyAction("create", {
+        code,
+        config: state.config,
+        trackKey: state.track.templateKey,
+        hazards: cloneHazards(state.track.hazards),
+      });
+      state.feedback = `${name} created race ${code}.`;
+      rebuildDriverConfig();
+      render();
+    } catch (error) {
+      state.feedback = error.message;
+      render();
+    }
   }
 
   async function joinLobby() {
     await refreshRemoteLobbies();
+    if (!lobbySync.remote) {
+      state.feedback = "The game server is unavailable. This release build requires the Rescue Gran Prix server.";
+      render();
+      return;
+    }
     const code = normalizedLobbyCode();
     const localName = normalizedPlayerName();
     if (!code) {
@@ -576,25 +638,15 @@
       render();
       return;
     }
-    const lobby = readLobby(code);
-    if (!lobby) {
-      state.feedback = `Race ${code} was not found. Create it first or join an available race.`;
+    try {
+      await postLobbyAction("join", { code });
+      state.feedback = `${localName} joined race ${code}.`;
+      rebuildDriverConfig();
       render();
-      return;
-    }
-    if (!lobby.players.some((player) => player.id === state.clientId) && lobby.players.length >= 4) {
-      state.feedback = `Race ${code} is full.`;
+    } catch (error) {
+      state.feedback = error.message;
       render();
-      return;
     }
-    loadLobby(lobby);
-    upsertLobbyPlayer(state.clientId, localName, state.lobby.players.length === 0);
-    state.phase = "setup";
-    syncConfigToLobby();
-    saveCurrentLobby();
-    state.feedback = `${localName} joined race ${state.lobby.code}.`;
-    rebuildDriverConfig();
-    render();
   }
 
   function upsertLobbyPlayer(id, name, host) {
@@ -613,22 +665,38 @@
   }
 
   function toggleReady() {
-    if (!state.lobby.active) {
-      state.feedback = "Create or join a race before marking ready.";
-      render();
-      return;
-    }
-    const localPlayer = localLobbyPlayer();
-    if (!localPlayer) return;
-    localPlayer.readyVersion = localPlayer.readyVersion === state.lobby.configVersion ? 0 : state.lobby.configVersion;
-    saveCurrentLobby();
-    render();
+    return;
   }
 
   function localLobbyPlayer() {
     const name = normalizedPlayerName();
     return state.lobby.players.find((player) => player.name === name)
       || state.lobby.players.find((player) => player.id === state.clientId);
+  }
+
+  function localPlayerIndex() {
+    const local = localLobbyPlayer();
+    if (!local) return -1;
+    return state.lobby.players.findIndex((player) => player.id === local.id);
+  }
+
+  function localIsHost() {
+    return Boolean(localLobbyPlayer()?.host);
+  }
+
+  function localCanControlTurn() {
+    const player = currentPlayer();
+    if (!player || player.isAi) return false;
+    return localPlayerIndex() === state.activeIndex;
+  }
+
+  function appendActivity(kind, text) {
+    state.activityLog.push({
+      at: Date.now(),
+      kind,
+      text,
+    });
+    state.activityLog = state.activityLog.slice(-40);
   }
 
   function normalizedLobbyCode() {
@@ -643,10 +711,13 @@
     return Array.from({ length: 6 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[randInt(0, 31)]).join("");
   }
 
+  function minimumHumanDrivers() {
+    return clamp(state.lobby.players.length || 1, 1, state.config.players || MAX_PLAYERS);
+  }
+
   function syncConfigToLobby() {
-    const humans = Math.max(1, state.lobby.players.length);
-    state.config.players = clamp(Math.max(2, humans), 2, 4);
-    state.config.humans = clamp(humans, 1, state.config.players);
+    state.config.players = clamp(Number(state.config.players) || 2, 2, MAX_PLAYERS);
+    state.config.humans = clamp(Number(state.config.humans) || minimumHumanDrivers(), minimumHumanDrivers(), state.config.players);
     els.playerCount.value = String(state.config.players);
     els.humanCount.value = String(state.config.humans);
   }
@@ -655,15 +726,13 @@
     if (!state.lobby.active) return;
     state.lobby.configVersion += 1;
     state.lobby.players.forEach((player) => {
-      player.readyVersion = 0;
+      player.readyVersion = state.lobby.configVersion;
     });
     saveCurrentLobby();
   }
 
   function lobbyIsReady() {
-    return state.lobby.active
-      && state.lobby.players.length > 0
-      && state.lobby.players.every((player) => player.readyVersion === state.lobby.configVersion);
+    return state.lobby.active && state.lobby.players.length > 0;
   }
 
   function readLobbyRegistry() {
@@ -694,9 +763,131 @@
     return lobby && Array.isArray(lobby.players) ? lobby : null;
   }
 
+  function actionUrl(code) {
+    return `${LOBBY_API_URL}/${encodeURIComponent(code)}/action`;
+  }
+
+  function clearActiveLobby() {
+    state.lobby = {
+      active: false,
+      code: "",
+      revision: 0,
+      configVersion: 0,
+      players: [],
+    };
+    state.phase = "lobby";
+    state.players = [];
+    state.currentQuestion = null;
+    state.review = null;
+    state.activityLog = [];
+    state.placements = [];
+    state.lastRace = [];
+  }
+
+  async function postLobbyAction(type, payload = {}) {
+    const code = String(payload.code || state.lobby.code || normalizedLobbyCode() || "").toUpperCase();
+    const targetLobby = readLobby(code);
+    const targetRevision = code === state.lobby.code
+      ? Number(state.lobby.revision || 0)
+      : Number(targetLobby?.revision || 0);
+    if (!code) throw new Error("Race code is required.");
+    const response = await fetch(actionUrl(code), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        code,
+        clientId: state.clientId,
+        playerName: normalizedPlayerName(),
+        revision: Object.prototype.hasOwnProperty.call(payload, "revision") ? payload.revision : targetRevision,
+        ...payload,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      if (result && result.lobbies && typeof result.lobbies === "object") {
+        lobbySync.registry = result.lobbies;
+      }
+      const error = new Error(result && result.error ? result.error : `Race action failed (${response.status})`);
+      error.errorCode = result && result.errorCode ? result.errorCode : "";
+      error.allowOverride = Boolean(result && result.allowOverride);
+      error.maxRacers = Number(result && result.maxRacers || 0);
+      error.absoluteMax = Number(result && result.absoluteMax || 0);
+      throw error;
+    }
+    lobbySync.remote = true;
+    lobbySync.checked = true;
+    lobbySync.lastError = "";
+    lobbySync.lastSyncAt = Date.now();
+    if (result && result.lobbies && typeof result.lobbies === "object") {
+      lobbySync.registry = result.lobbies;
+      writeLobbyRegistry(result.lobbies);
+    }
+    if (result && result.lobby) {
+      loadLobby(result.lobby);
+    } else {
+      clearActiveLobby();
+    }
+    return result;
+  }
+
+  async function syncLobbySetup() {
+    if (!state.lobby.active || !lobbySync.remote) return;
+    await postLobbyAction("configure", {
+      config: state.config,
+      trackKey: state.track.templateKey,
+      hazards: cloneHazards(state.track.hazards),
+    });
+  }
+
+  function collectDriverDefinitions() {
+    return [...els.driverConfig.querySelectorAll(".driver-card")].map((card) => ({
+      initials: card.querySelector(".driver-initials").value,
+      timed: card.querySelector(".driver-timed").checked,
+      controller: card.querySelector(".driver-controller").value,
+    }));
+  }
+
   function initRemoteLobbySync() {
     refreshRemoteLobbies();
-    window.setInterval(refreshRemoteLobbies, 1600);
+    initLobbyStream();
+    window.setInterval(refreshRemoteLobbies, 10000);
+  }
+
+  function initLobbyStream() {
+    if (!("EventSource" in window) || lobbySync.stream) return;
+    try {
+      const stream = new EventSource(LOBBY_STREAM_URL);
+      lobbySync.stream = stream;
+      stream.onmessage = (event) => {
+        const payload = JSON.parse(event.data || "{}");
+        lobbySync.remote = true;
+        lobbySync.checked = true;
+        lobbySync.lastError = "";
+        lobbySync.lastSyncAt = Date.now();
+        lobbySync.registry = payload && payload.lobbies && typeof payload.lobbies === "object"
+          ? payload.lobbies
+          : {};
+        writeLobbyRegistry(lobbySync.registry);
+        if (state.lobby.active) {
+          const latest = readLobby(state.lobby.code);
+          if (latest) {
+            loadLobby(latest);
+            if (state.phase === "setup" || state.phase === "lobby") {
+              rebuildDriverConfig();
+            }
+          } else {
+            clearActiveLobby();
+          }
+        }
+        render();
+      };
+      stream.onerror = () => {
+        lobbySync.lastError = "Live server stream disconnected";
+      };
+    } catch {
+      lobbySync.lastError = "Live server stream unavailable";
+    }
   }
 
   async function refreshRemoteLobbies() {
@@ -711,11 +902,14 @@
         ? payload.lobbies
         : {};
 
-      if (state.lobby.active && (state.phase === "setup" || state.phase === "lobby")) {
+      lobbySync.lastSyncAt = Date.now();
+      if (state.lobby.active) {
         const latest = readLobby(state.lobby.code);
         if (latest) {
           loadLobby(latest);
-          rebuildDriverConfig();
+          if (state.phase === "setup" || state.phase === "lobby") {
+            rebuildDriverConfig();
+          }
         }
       }
       render();
@@ -733,11 +927,22 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(lobby),
       });
+      if (response.status === 409) {
+        const payload = await response.json();
+        if (payload && payload.lobby) {
+          loadLobby(payload.lobby);
+        }
+        throw new Error("Lobby changed on another device. Latest state loaded.");
+      }
       if (!response.ok) throw new Error(`Lobby save returned ${response.status}`);
       const payload = await response.json();
+      if (payload && payload.lobby) {
+        state.lobby.revision = Number(payload.lobby.revision || state.lobby.revision);
+      }
       if (payload && payload.lobbies && typeof payload.lobbies === "object") {
         lobbySync.registry = payload.lobbies;
       }
+      lobbySync.lastSyncAt = Date.now();
     } catch (error) {
       lobbySync.lastError = error && error.message ? error.message : "Lobby save failed";
     }
@@ -752,16 +957,21 @@
       config: { ...state.config },
       trackKey: state.track.templateKey,
       hazards: cloneHazards(state.track.hazards),
+      game: serializeGameState(),
+      activityLog: state.activityLog.slice(-40),
     };
     registry[state.lobby.code] = savedLobby;
     writeLobbyRegistry(registry);
-    persistRemoteLobby(savedLobby);
+    if (!lobbySync.remote) {
+      persistRemoteLobby(savedLobby);
+    }
   }
 
   function loadLobby(lobby) {
     state.lobby = {
       active: true,
       code: lobby.code,
+      revision: Number(lobby.revision || 0),
       configVersion: lobby.configVersion || 1,
       players: Array.isArray(lobby.players) ? lobby.players : [],
     };
@@ -770,14 +980,54 @@
         ...state.config,
         ...lobby.config,
       };
+      state.config.players = Math.max(state.config.players, Array.isArray(lobby.players) ? lobby.players.length : 0, 2);
+      state.config.humans = clamp(Math.max(state.config.humans, state.lobby.players.length), 1, state.config.players);
       els.playerCount.value = String(state.config.players);
       els.humanCount.value = String(state.config.humans);
       els.modeSelect.value = String(state.config.mode);
       els.trackSelect.value = state.config.track;
       els.themeSelect.value = state.config.theme;
-      state.track = buildTrackInstance(state.config.track);
+      state.track = buildTrackInstance(state.config.track, lobby.trackKey);
       if (lobby.hazards) {
         state.track.hazards = cloneHazards(lobby.hazards);
+      }
+    }
+    state.activityLog = Array.isArray(lobby.activityLog) ? lobby.activityLog.slice(-40) : [];
+    applyGameState(lobby.game);
+  }
+
+  function serializeGameState() {
+    return {
+      phase: state.phase,
+      activeIndex: state.activeIndex,
+      currentQuestion: state.currentQuestion,
+      review: state.review,
+      players: state.players.map((player) => ({ ...player })),
+      askedQuestionIds: [...state.askedQuestionIds],
+      forceThree: state.forceThree,
+      placements: state.placements.map((player) => ({ ...player })),
+      lastRace: state.lastRace.map((record) => ({ ...record })),
+      feedback: state.feedback,
+      trackTemplateKey: state.track.templateKey,
+    };
+  }
+
+  function applyGameState(game) {
+    if (!game || typeof game !== "object") return;
+    state.phase = typeof game.phase === "string" ? game.phase : state.phase;
+    state.activeIndex = Number.isInteger(game.activeIndex) ? game.activeIndex : state.activeIndex;
+    state.currentQuestion = game.currentQuestion && typeof game.currentQuestion === "object" ? game.currentQuestion : null;
+    state.review = game.review && typeof game.review === "object" ? game.review : null;
+    state.players = Array.isArray(game.players) ? game.players.map((player) => ({ ...player })) : state.players;
+    state.askedQuestionIds = new Set(Array.isArray(game.askedQuestionIds) ? game.askedQuestionIds : []);
+    state.forceThree = Boolean(game.forceThree);
+    state.placements = Array.isArray(game.placements) ? game.placements.map((player) => ({ ...player })) : [];
+    state.lastRace = Array.isArray(game.lastRace) ? game.lastRace.map((record) => ({ ...record })) : [];
+    state.feedback = typeof game.feedback === "string" ? game.feedback : state.feedback;
+    if (typeof game.trackTemplateKey === "string" && game.trackTemplateKey) {
+      state.track = buildTrackInstance(state.config.track, game.trackTemplateKey);
+      if (readLobby(state.lobby.code)?.hazards) {
+        state.track.hazards = cloneHazards(readLobby(state.lobby.code).hazards);
       }
     }
   }
@@ -829,8 +1079,13 @@
 
   function rebuildDriverConfig() {
     els.driverConfig.innerHTML = "";
+    const totalDrivers = Math.max(state.config.players, state.lobby.players.length || 0, 2);
+    state.config.players = clamp(totalDrivers, 2, MAX_PLAYERS);
+    els.playerCount.value = String(state.config.players);
+    state.config.humans = clamp(state.config.humans, minimumHumanDrivers(), state.config.players);
+    els.humanCount.value = String(state.config.humans);
     for (let index = 0; index < state.config.players; index += 1) {
-      const player = PLAYER_STYLES[index];
+      const player = styleForIndex(index);
       const lobbyPlayer = state.lobby.players[index];
       const fragment = els.driverTemplate.content.cloneNode(true);
       const card = fragment.querySelector(".driver-card");
@@ -842,74 +1097,63 @@
       swatch.style.background = player.color;
       name.textContent = lobbyPlayer ? lobbyPlayer.name : player.name;
       initials.value = (lobbyPlayer ? lobbyPlayer.name : player.name).split(" ").map((part) => part[0]).join("").slice(0, 3).toUpperCase();
-      controller.value = index < state.config.humans ? "human" : "ai";
+      controller.value = lobbyPlayer || index < state.config.humans ? "human" : "ai";
       controller.addEventListener("change", syncHumanCountFromControllers);
       card.dataset.index = String(index);
       els.driverConfig.append(card);
     }
+    const humans = [...els.driverConfig.querySelectorAll(".driver-card")]
+      .filter((card) => card.querySelector(".driver-controller").value === "human").length;
+    state.config.humans = clamp(humans, 1, state.config.players);
+    els.humanCount.value = String(state.config.humans);
   }
 
   function syncHumanCountFromControllers() {
     const cards = [...els.driverConfig.querySelectorAll(".driver-card")];
     const humans = cards.filter((card) => card.querySelector(".driver-controller").value === "human").length;
-    state.config.humans = clamp(humans, 1, state.config.players);
+    state.config.humans = clamp(humans, minimumHumanDrivers(), state.config.players);
     els.humanCount.value = String(state.config.humans);
     invalidateLobbyReady();
   }
 
-  function startRace() {
-    if (state.lobby.active && !lobbyIsReady()) {
-      state.feedback = "All lobby players must be ready before the race starts.";
+  async function startRace() {
+    try {
+      await postLobbyAction("startRace", {
+        drivers: collectDriverDefinitions(),
+      });
       render();
-      return;
-    }
-    const cards = [...els.driverConfig.querySelectorAll(".driver-card")];
-    state.players = cards.map((card, index) => {
-      const style = PLAYER_STYLES[index];
-      const lobbyPlayer = state.lobby.players[index];
-      const isAi = card.querySelector(".driver-controller").value === "ai";
-      const initialsValue = card.querySelector(".driver-initials").value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3);
-      return {
-        ...style,
-        name: lobbyPlayer && !isAi ? lobbyPlayer.name : style.name,
-        initials: isAi ? "CPU" : (initialsValue || style.name.slice(0, 3).toUpperCase()),
-        isAi,
-        timed: card.querySelector(".driver-timed").checked,
-        position: 0,
-        score: 0,
-        correctAnswers: 0,
-        shielded: false,
-        brokenDown: false,
-        skipNextSelection: false,
-      };
-    });
-
-    state.activeIndex = 0;
-    state.phase = "chooseMove";
-    state.currentQuestion = null;
-    state.askedQuestionIds.clear();
-    state.feedback = "Race started. Choose a move, then answer an EMT question.";
-    state.forceThree = false;
-    state.placements = [];
-    state.track = buildTrackInstance(state.config.track);
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-
-    if (currentPlayer().isAi) {
-      queueAiTurn();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      state.feedback = error.message;
+      render();
     }
   }
 
-  function resetToSetup() {
-    state.phase = state.lobby.active ? "setup" : "lobby";
-    state.currentQuestion = null;
-    state.askedQuestionIds.clear();
-    state.feedback = "Set up the next race.";
-    state.players = [];
-    state.placements = [];
-    state.track = buildTrackInstance(state.config.track);
+  async function resetToSetup() {
+    if (!state.lobby.active || !lobbySync.remote) {
+      clearActiveLobby();
+      render();
+      return;
+    }
+    try {
+      await postLobbyAction("reset");
+      rebuildDriverConfig();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      state.feedback = error.message;
+      render();
+    }
+  }
+
+  function leaveCurrentRace() {
+    const code = state.lobby.code;
+    clearActiveLobby();
+    if (code) {
+      els.joinCode.value = code;
+      state.feedback = `Left race ${code}.`;
+    }
     render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function difficultyForMove(player, spaces, repair) {
@@ -972,21 +1216,13 @@
     return score;
   }
 
-  function askQuestion(move) {
-    const player = currentPlayer();
-    const repair = player.brokenDown;
-    state.currentQuestion = {
-      ...generateQuestion(player, move, repair),
-      move,
-      repair,
-    };
-    state.phase = "answering";
-    state.feedback = repair
-      ? `${player.name} needs a repair answer.`
-      : `${player.name} is answering for ${move} space${move === 1 ? "" : "s"}.`;
-    render();
-    if (player.isAi) {
-      queueAiAnswer();
+  async function askQuestion(move) {
+    try {
+      await postLobbyAction("chooseMove", { move });
+      render();
+    } catch (error) {
+      state.feedback = error.message;
+      render();
     }
   }
 
@@ -1029,6 +1265,8 @@
       if (hazard === "skipper") score += 12;
       if (hazard === "sinker") score += 8;
       if (hazard === "steps") score += 5;
+      if (hazard === "oil") score += 3;
+      if (hazard === "redflag") score -= 8;
       if (target >= FIRST_CROSSING_INDEX && !state.track.safeSpots.has(target)) {
         score += state.players.filter((other) => other !== player && other.position === target && !other.brokenDown).length * 9;
       }
@@ -1040,30 +1278,14 @@
     return bestMove;
   }
 
-  function submitAnswer(rawValue) {
-    const player = currentPlayer();
-    const expected = state.currentQuestion.answer;
-    const selectedOption = state.currentQuestion.options.find((option) => option.id === rawValue);
-    const correct = rawValue === expected;
-
-    if (correct) {
-      const points = awardPoints(player, state.currentQuestion.difficulty, state.currentQuestion.move);
-      if (state.currentQuestion.repair) {
-        player.brokenDown = false;
-        state.feedback = `${player.name} repaired the car. +${points} points.`;
-      } else {
-        applyMove(player, state.currentQuestion.move, points);
-      }
-    } else {
-      const detail = selectedOption && selectedOption.explanation ? ` ${selectedOption.explanation}` : "";
-      state.feedback = `Incorrect. Correct answer: ${state.currentQuestion.correctText}.${detail}`;
+  async function submitAnswer(rawValue) {
+    try {
+      await postLobbyAction("submitAnswer", { answerId: rawValue });
+      render();
+    } catch (error) {
+      state.feedback = error.message;
+      render();
     }
-
-    state.currentQuestion = null;
-    if (state.phase !== "gameOver") {
-      nextTurn();
-    }
-    render();
   }
 
   function applyMove(player, move, points) {
@@ -1096,6 +1318,14 @@
     } else if (hazard === "steps") {
       state.forceThree = true;
       state.feedback = `${player.name} reached Steps. Only 3-space moves remain. +${points} points.`;
+    } else if (hazard === "oil") {
+      const slide = Math.min(2, FINISH_INDEX - player.position);
+      player.position = Math.min(FINISH_INDEX, player.position + slide);
+      player.missNextTurn = true;
+      state.feedback = `${player.name} hit an Oil Slick, slid ${slide} extra space${slide === 1 ? "" : "s"}, and will lose the next turn. +${points} points.`;
+    } else if (hazard === "redflag") {
+      player.missNextTurn = true;
+      state.feedback = `${player.name} triggered a Red Flag and will lose the next turn. +${points} points.`;
     } else {
       state.feedback = `${player.name} advanced ${move} space${move === 1 ? "" : "s"}. +${points} points.`;
     }
@@ -1125,6 +1355,7 @@
       mode: state.config.mode,
       track: state.track.templateKey,
     }));
+    appendActivity("finish", `${winner.name} won the race on ${TRACK_LAYOUTS[state.config.track].name}.`);
   }
 
   function nextTurn() {
@@ -1133,11 +1364,27 @@
       player.skipNextSelection = false;
       state.phase = "chooseMove";
     } else {
-      state.activeIndex = (state.activeIndex + 1) % state.players.length;
+      let nextIndex = (state.activeIndex + 1) % state.players.length;
+      while (state.players[nextIndex]?.missNextTurn) {
+        state.players[nextIndex].missNextTurn = false;
+        appendActivity("race", `${state.players[nextIndex].name} lost a turn.`);
+        nextIndex = (nextIndex + 1) % state.players.length;
+      }
+      state.activeIndex = nextIndex;
       state.phase = "chooseMove";
     }
     if (currentPlayer().isAi) {
       queueAiTurn();
+    }
+  }
+
+  async function continueAfterReview() {
+    try {
+      await postLobbyAction("continue");
+      render();
+    } catch (error) {
+      state.feedback = error.message;
+      render();
     }
   }
 
@@ -1169,9 +1416,10 @@
         </defs>
         ${sceneryMarkup}
         <g filter="url(#softShadow)">
-          <polyline points="${path}" fill="none" stroke="rgba(35,38,38,0.2)" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"></polyline>
-          <polyline points="${path}" fill="none" stroke="var(--road)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"></polyline>
-          <polyline points="${path}" fill="none" stroke="var(--road-edge)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+          <polyline points="${path}" fill="none" stroke="rgba(17,21,28,0.3)" stroke-width="112" stroke-linecap="round" stroke-linejoin="round"></polyline>
+          <polyline points="${path}" fill="none" stroke="#e55a4e" stroke-width="92" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"></polyline>
+          <polyline points="${path}" fill="none" stroke="var(--road)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"></polyline>
+          <polyline points="${path}" fill="none" stroke="var(--road-edge)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"></polyline>
           ${laneMarkup}
         </g>
         <g>
@@ -1180,10 +1428,11 @@
           <text x="905" y="78" text-anchor="middle" fill="var(--muted)" font-size="12">${escapeHtml(state.track.templateKey)}</text>
         </g>
         <g>
-          <rect x="36" y="34" width="132" height="84" rx="18" fill="rgba(255,251,241,0.92)" stroke="var(--panel-border)" stroke-width="2"></rect>
-          <text x="54" y="66" fill="var(--text)" font-size="20" font-weight="700">FINISH</text>
+          <rect x="28" y="26" width="164" height="98" rx="20" fill="rgba(255,251,241,0.95)" stroke="var(--panel-border)" stroke-width="2"></rect>
+          <text x="54" y="58" fill="var(--text)" font-size="18" font-weight="800">START / FINISH</text>
+          <rect x="48" y="72" width="120" height="10" rx="5" fill="#2c3440"></rect>
           <g transform="translate(52 88)">
-            ${[0, 1, 2, 3].map((i) => `<rect x="${i * 18}" y="0" width="10" height="32" fill="${i % 2 === 0 ? "#222" : "#f2f2f2"}"></rect>`).join("")}
+            ${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="${i * 18}" y="0" width="10" height="32" fill="${i % 2 === 0 ? "#222" : "#f2f2f2"}"></rect>`).join("")}
           </g>
         </g>
         ${points.map((point, index) => nodeSvg(point, index)).join("")}
@@ -1283,6 +1532,8 @@
       skipper: "#87d8ff",
       sinker: "#bea0e9",
       steps: "#ffb56e",
+      oil: "#b1bbc9",
+      redflag: "#f19a93",
     };
     const fill = fills[hazard] || (state.track.safeSpots.has(index) ? "#d9e6c5" : "#fbfbfb");
     return `
@@ -1305,13 +1556,18 @@
         : spec.icon === "shield"
           ? `<path d="M0,-17 L15,-11 L12,8 L0,18 L-12,8 L-15,-11 Z" fill="${spec.color}" stroke="#3a3a33" stroke-width="2"></path>`
           : `<path d="M-14,14 L-14,5 L-6,5 L-6,-4 L3,-4 L3,-13 L14,-13" fill="none" stroke="${spec.color}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>`;
+    const resolvedIcon = spec.icon === "oil"
+      ? `<g><ellipse cx="0" cy="10" rx="16" ry="9" fill="${spec.color}" stroke="#3a3a33" stroke-width="2"></ellipse><path d="M0,-14 C8,-4 9,1 0,8 C-9,1 -8,-4 0,-14 Z" fill="${spec.color}" stroke="#3a3a33" stroke-width="2"></path></g>`
+      : spec.icon === "redflag"
+        ? `<g><path d="M-5,-18 L-5,16" stroke="#3a3a33" stroke-width="3" stroke-linecap="round"></path><path d="M-3,-16 L16,-10 L-3,-3 Z" fill="${spec.color}" stroke="#3a3a33" stroke-width="2"></path></g>`
+        : iconMarkup;
     return `
       <g transform="translate(${point[0]} ${point[1] - 42})">
         <rect x="-44" y="-46" width="88" height="22" rx="7" fill="rgba(255,255,255,0.92)" stroke="${spec.color}" stroke-width="2"></rect>
         <text x="-33" y="-30" fill="#263139" font-size="13" font-weight="900">${spec.short}</text>
         <text x="-16" y="-30" fill="#263139" font-size="12" font-weight="800">${spec.label.toUpperCase()}</text>
         <text x="34" y="-30" text-anchor="end" fill="#263139" font-size="12" font-weight="900">${space}</text>
-        ${iconMarkup}
+        ${resolvedIcon}
       </g>
     `;
   }
@@ -1319,47 +1575,62 @@
   function carSvg(x, y, color, angle) {
     return `
       <g transform="translate(${x} ${y}) rotate(${angle})">
-        <ellipse cx="0" cy="18" rx="22" ry="6" fill="rgba(0,0,0,0.24)"></ellipse>
-        <path d="M-22,-10 C-10,-20 12,-20 24,-8 L28,8 C14,18 -12,18 -28,8 Z" fill="#22272c"></path>
-        <path d="M-18,-8 C-8,-15 10,-15 20,-6 L22,7 C10,14 -10,14 -22,7 Z" fill="${color}"></path>
-        <path d="M-5,-14 L9,-12 L14,-4 L-10,-4 Z" fill="#dff4ff" opacity="0.9"></path>
-        <circle cx="-16" cy="11" r="6" fill="#151719"></circle>
-        <circle cx="16" cy="11" r="6" fill="#151719"></circle>
-        <circle cx="-16" cy="11" r="2" fill="#ffffff"></circle>
-        <circle cx="16" cy="11" r="2" fill="#ffffff"></circle>
-        <path d="M24,-5 L34,0 L24,5 Z" fill="#ffe681"></path>
+        <ellipse cx="0" cy="20" rx="24" ry="7" fill="rgba(0,0,0,0.26)"></ellipse>
+        <path d="M-26,5 L-20,-10 C-12,-18 10,-20 22,-10 L28,5 C20,16 -18,16 -26,5 Z" fill="#161b22"></path>
+        <path d="M-21,4 L-16,-8 C-10,-14 8,-16 18,-8 L23,4 C15,12 -14,12 -21,4 Z" fill="${color}"></path>
+        <path d="M-8,-11 C-3,-16 7,-16 13,-10 L10,-2 L-11,-2 Z" fill="#cfe9ff" opacity="0.92"></path>
+        <path d="M-16,-2 L17,-2" stroke="rgba(255,255,255,0.28)" stroke-width="2"></path>
+        <path d="M-10,9 L11,9" stroke="rgba(0,0,0,0.18)" stroke-width="2"></path>
+        <circle cx="-16" cy="10" r="6" fill="#111417"></circle>
+        <circle cx="16" cy="10" r="6" fill="#111417"></circle>
+        <circle cx="-16" cy="10" r="2.2" fill="#f7f7f7"></circle>
+        <circle cx="16" cy="10" r="2.2" fill="#f7f7f7"></circle>
+        <rect x="22" y="-2" width="9" height="4" rx="2" fill="#ffe592"></rect>
+        <rect x="-29" y="-2" width="6" height="4" rx="2" fill="#ff8a7c"></rect>
       </g>
     `;
   }
 
   function renderStatus() {
     const player = currentPlayer();
-    const readyText = state.lobby.active
-      ? `${state.lobby.players.filter((entry) => entry.readyVersion === state.lobby.configVersion).length}/${state.lobby.players.length} ready`
-      : "No lobby";
-    const rows = [
-      `Turn: ${player ? player.name : "No race running"}`,
-      `Lobby: ${state.lobby.code || "None"} | ${readyText}`,
-      `Question Set: ${MODE_NAMES[state.config.mode]}`,
-      `Track Family: ${TRACK_LAYOUTS[state.config.track].name}`,
-      `Template: ${state.track.templateKey}`,
-      `Hazards: ${hazardSummary()}`,
-      state.forceThree ? "Steps is active. Only 3-space moves remain." : "Choose 1, 2, or 3 spaces before answering.",
-      state.feedback,
-    ];
+    const raceRows = state.phase === "race"
+      ? [
+        `Turn: ${player ? player.name : "No race running"}`,
+        `Race ${state.lobby.code || "None"} | ${state.lobby.players.length} racer${state.lobby.players.length === 1 ? "" : "s"} | ${TRACK_LAYOUTS[state.config.track].name}`,
+        state.forceThree ? "Steps is active. Only 3-space moves remain." : state.feedback,
+      ]
+      : [
+        `Turn: ${player ? player.name : "No race running"}`,
+        `Race: ${state.lobby.code || "None"} | ${state.lobby.players.length} racer${state.lobby.players.length === 1 ? "" : "s"}`,
+        `Question Set: ${MODE_NAMES[state.config.mode]}`,
+        `Track Family: ${TRACK_LAYOUTS[state.config.track].name}`,
+        `Hazards: ${hazardSummary()}`,
+        lobbySync.remote
+          ? `Server sync: live${lobbySync.lastSyncAt ? ` | ${formatClock(lobbySync.lastSyncAt)}` : ""}`
+          : `Server sync: browser fallback${lobbySync.lastError ? ` | ${lobbySync.lastError}` : ""}`,
+        state.feedback,
+      ];
 
-    const newRaceAction = state.phase === "setup" || state.phase === "lobby"
-      ? ""
-      : `<button class="ghost-btn status-new-race" type="button">New Race</button>`;
+    const utilityActions = state.phase === "race"
+      ? `
+        <div class="utility-actions">
+          <button class="ghost-btn utility-btn" id="leave-race-btn" type="button">Leave View</button>
+          <button class="ghost-btn utility-btn" id="reset-race-btn" type="button"${localIsHost() ? "" : " disabled"}>Reset Race</button>
+          <button class="ghost-btn utility-btn danger" id="close-race-inline-btn" type="button"${localIsHost() ? "" : " disabled"}>Close Race</button>
+        </div>
+      `
+      : "";
 
-    els.statusSummary.innerHTML = rows.map((line, index) => `
+    els.statusSummary.innerHTML = raceRows.map((line, index) => `
       <div class="info-card">${index === 0 ? `<strong>${escapeHtml(line)}</strong>` : escapeHtml(line)}</div>
-    `).join("") + newRaceAction;
+    `).join("") + utilityActions;
 
-    const statusNewRace = els.statusSummary.querySelector(".status-new-race");
-    if (statusNewRace) {
-      statusNewRace.addEventListener("click", resetToSetup);
-    }
+    const leaveRaceBtn = els.statusSummary.querySelector("#leave-race-btn");
+    if (leaveRaceBtn) leaveRaceBtn.addEventListener("click", leaveCurrentRace);
+    const resetRaceBtn = els.statusSummary.querySelector("#reset-race-btn");
+    if (resetRaceBtn) resetRaceBtn.addEventListener("click", resetToSetup);
+    const closeRaceInlineBtn = els.statusSummary.querySelector("#close-race-inline-btn");
+    if (closeRaceInlineBtn) closeRaceInlineBtn.addEventListener("click", closeCurrentRace);
   }
 
   function renderRoster() {
@@ -1378,162 +1649,214 @@
         timed: false,
       }));
     els.driverRoster.innerHTML = roster.map((player, index) => `
-      <div class="driver-row${index === state.activeIndex && state.phase !== "setup" ? " active" : ""}">
-        <div class="driver-row-title">
-          <span style="color:${player.color}">${player.name} [${player.initials}]</span>
-          <span class="badge">${player.isAi ? "AI" : "Human"}</span>
-        </div>
-        <div class="driver-meta">Position ${player.position} | Score ${player.score} | Correct ${player.correctAnswers}</div>
-        <div class="driver-meta">${player.brokenDown ? "Broken down" : player.shielded ? "Shielded" : "Rolling"} | ${player.timed ? "Timed" : "Untimed"}</div>
+        <div class="driver-row${index === state.activeIndex && state.phase !== "setup" ? " active" : ""}">
+          <div class="driver-row-title">
+            <span style="color:${player.color}">${player.name} [${player.initials}]</span>
+            <span class="badge">${player.isAi ? "AI" : "Human"}</span>
+          </div>
+          <div class="driver-meta">Position ${player.position} | Score ${player.score} | Correct ${player.correctAnswers}</div>
+        <div class="driver-meta">${player.brokenDown ? "Broken down" : player.shielded ? "Shielded" : player.missNextTurn ? "Turn lost next round" : "Rolling"} | ${player.timed ? "Timed" : "Untimed"}</div>
       </div>
     `).join("");
   }
 
-  function renderPrompt() {
-    els.moveControls.innerHTML = "";
-    els.answerControls.innerHTML = "";
-    els.promptBody.innerHTML = "";
+  function renderActivityFeed() {
+    const entries = state.activityLog.slice().reverse();
+    els.activityFeed.innerHTML = entries.length
+      ? entries.map((entry) => `
+        <div class="activity-entry ${escapeHtml(entry.kind || "info")}">
+          <div class="activity-time">${escapeHtml(formatClock(entry.at))}</div>
+          <div>${escapeHtml(entry.text)}</div>
+        </div>
+      `).join("")
+      : `<div class="info-card muted">Race activity will appear here for both racers.</div>`;
+  }
 
-    if (state.phase === "lobby") {
-      els.promptTitle.textContent = "Lobby";
-      els.promptBody.innerHTML = `
-        <div class="info-card">Create a race or join with a race code.</div>
-      `;
-      return;
-    }
+  function renderAdminPanel() {
+    els.adminPanel.hidden = !state.adminOpen;
+    els.adminToggleBtn.textContent = state.adminOpen ? "Hide Admin" : "Admin";
+    els.adminToggleBtn.setAttribute("aria-expanded", state.adminOpen ? "true" : "false");
+  }
 
-    if (state.phase === "setup") {
-      els.promptTitle.textContent = "Ready";
-      const ready = lobbyIsReady();
-      els.promptBody.innerHTML = `
-        <div class="info-card">${ready ? "All players are ready." : "Configuration changes require everyone to ready up again."}</div>
-        <div class="info-card">Use Randomize Hazards to keep the selected map and reshuffle special spaces.</div>
-      `;
-      return;
-    }
+  function toggleAdminPanel() {
+    state.adminOpen = !state.adminOpen;
+    render();
+  }
 
-    if (state.phase === "chooseMove") {
-      els.promptTitle.textContent = "Choose Distance";
-      els.promptBody.innerHTML = `
-        <div class="info-card"><strong>${escapeHtml(currentPlayer().name)}</strong>: choose how far to move.</div>
-      `;
-      if (!currentPlayer().isAi) {
-        MOVE_OPTIONS.forEach((move) => {
-          const button = document.createElement("button");
-          button.className = "primary-btn move-btn";
-          button.textContent = `${move}`;
-          const reachesFinish = currentPlayer().position + move >= FINISH_INDEX;
-          button.disabled = state.forceThree && move !== 3 && !reachesFinish;
-          button.addEventListener("click", () => askQuestion(move));
-          els.moveControls.append(button);
-        });
-      } else {
-        els.promptBody.innerHTML += `<div class="info-card muted">AI is choosing a move...</div>`;
-      }
-      return;
-    }
-
-    if (state.phase === "answering") {
-      els.promptTitle.textContent = "Respond";
-      const context = state.currentQuestion.caseContext
-        ? `<div class="case-context">${escapeHtml(state.currentQuestion.caseContext)}</div>`
-        : "";
-      els.promptBody.innerHTML = `
-        <div class="question-card">
-          ${context}
-          <strong>${escapeHtml(state.currentQuestion.prompt)}</strong>
-          <div class="muted">${escapeHtml(state.currentQuestion.moduleName)} | Difficulty ${state.currentQuestion.difficulty + 1} | Move ${state.currentQuestion.move}</div>
-          <div class="source-ref">${escapeHtml(state.currentQuestion.sourceRef)}</div>
+  function renderRaceConsole(errorMessage = "") {
+    if (errorMessage) {
+      els.raceConsole.innerHTML = `
+        <div class="race-console-card">
+          <p class="eyebrow">Error</p>
+          <h3>Unexpected problem</h3>
+          <div class="error-banner">${escapeHtml(errorMessage)}</div>
         </div>
       `;
-      if (!currentPlayer().isAi) {
-        state.currentQuestion.options.forEach((option, index) => {
+      return;
+    }
+
+    if (state.review) {
+      els.raceConsole.innerHTML = `
+        <div class="race-console-card">
+          <div class="race-console-head">
+            <div>
+              <p class="eyebrow">${state.review.correct ? "Correct" : "Review"}</p>
+              <h3>${escapeHtml(state.review.summary)}</h3>
+            </div>
+            <div class="race-console-meta"><span>${escapeHtml(state.review.playerName)}</span></div>
+          </div>
+          <div class="answer-review ${state.review.correct ? "success" : "error"}">
+            <p><strong>Question:</strong> ${escapeHtml(state.review.prompt || "")}</p>
+            <p><strong>Selected Answer:</strong> ${escapeHtml(state.review.selectedText || "")}</p>
+            <p><strong>Correct Answer:</strong> ${escapeHtml(state.review.correctText || "")}</p>
+            <strong>${escapeHtml(state.review.summary)}</strong>
+            <p>${escapeHtml(state.review.explanation || state.feedback)}</p>
+          </div>
+          <div class="race-console-footer">
+            <button id="continue-review-btn" class="primary-btn compact-btn" type="button">${state.phase === "gameOver" ? "Close Review" : "Continue"}</button>
+          </div>
+        </div>
+      `;
+      els.raceConsole.querySelector("#continue-review-btn").addEventListener("click", continueAfterReview);
+      return;
+    }
+
+    if (state.phase === "answering" && state.currentQuestion) {
+      const question = state.currentQuestion;
+      const canControl = localCanControlTurn();
+      const context = question.caseContext
+        ? `<div class="case-context">${escapeHtml(question.caseContext)}</div>`
+        : "";
+      const waitingMessage = !currentPlayer().isAi && !canControl
+        ? `<div class="info-card muted">${escapeHtml(currentPlayer().name)} is answering on another device.</div>`
+        : currentPlayer().isAi
+          ? `<div class="info-card muted">AI is answering...</div>`
+          : "";
+      els.raceConsole.innerHTML = `
+        <div class="race-console-card">
+          <div class="race-console-head">
+            <div>
+              <p class="eyebrow">${escapeHtml(currentPlayer().name)} answering</p>
+              <h3>${escapeHtml(question.prompt)}</h3>
+            </div>
+            <div class="race-console-meta">
+              <span>${escapeHtml(question.moduleName)}</span>
+              <span>Difficulty ${question.difficulty + 1}</span>
+              <span>Move ${question.move}</span>
+            </div>
+          </div>
+          ${context}
+          <div class="source-ref">${escapeHtml(question.sourceRef || "")}</div>
+          <div class="race-console-options"></div>
+          ${waitingMessage}
+        </div>
+      `;
+      const optionsEl = els.raceConsole.querySelector(".race-console-options");
+      if (!waitingMessage) {
+        question.options.forEach((option, index) => {
           const button = document.createElement("button");
-          button.className = "answer-option";
+          button.className = "answer-option compact-option";
           button.type = "button";
           button.innerHTML = `<span>${String.fromCharCode(65 + index)}</span>${escapeHtml(option.text)}`;
           button.addEventListener("click", () => submitAnswer(option.id));
-          els.answerControls.append(button);
+          optionsEl.append(button);
         });
-      } else {
-        els.answerControls.innerHTML = `<div class="muted">AI is answering...</div>`;
       }
       return;
     }
 
-    if (state.phase === "gameOver") {
-      els.promptTitle.textContent = "Results";
-      const results = state.placements.map((player, index) => `<li>${index + 1}. ${player.initials} ${player.name} - ${player.score} pts</li>`).join("");
-      els.promptBody.innerHTML = `
-        <div class="info-card"><strong>${escapeHtml(state.feedback)}</strong></div>
-        <div class="score-list">
-          <h3>Final Standings</h3>
-          <ol>${results}</ol>
+    if (state.phase === "chooseMove" && currentPlayer()) {
+      const player = currentPlayer();
+      const canControl = localCanControlTurn();
+      const waiting = !player.isAi && !canControl
+        ? `<div class="info-card muted">${escapeHtml(player.name)} is choosing a move on another device.</div>`
+        : player.isAi
+          ? `<div class="info-card muted">AI is choosing a move...</div>`
+          : "";
+      els.raceConsole.innerHTML = `
+        <div class="race-console-card">
+          <div class="race-console-head">
+            <div>
+              <p class="eyebrow">Choose move</p>
+              <h3>${escapeHtml(player.name)}: pick your distance</h3>
+            </div>
+            <div class="race-console-meta">
+              <span>${state.forceThree ? "Steps active" : "Choose 1, 2, or 3 spaces"}</span>
+            </div>
+          </div>
+          <div class="info-card">${escapeHtml(player.name)} will answer a question for the selected move.</div>
+          <div class="move-controls compact-move-controls"></div>
+          ${waiting}
         </div>
       `;
+      const controlsEl = els.raceConsole.querySelector(".compact-move-controls");
+      if (!waiting) {
+        MOVE_OPTIONS.forEach((move) => {
+          const button = document.createElement("button");
+          button.className = "primary-btn move-btn compact-btn";
+          button.type = "button";
+          button.textContent = `${move}`;
+          const reachesFinish = player.position + move >= FINISH_INDEX;
+          button.disabled = state.forceThree && move !== 3 && !reachesFinish;
+          button.addEventListener("click", () => askQuestion(move));
+          controlsEl.append(button);
+        });
+      }
+      return;
     }
-  }
 
-  function renderResults() {
-    const standings = state.lastRace.length
-      ? `<ol>${state.lastRace.map((record) => `<li>${record.initials} ${escapeHtml(record.name)} - ${record.score} pts (${escapeHtml(record.track)})</li>`).join("")}</ol>`
-      : `<p class="muted">No completed race yet.</p>`;
-
-    els.resultsBody.innerHTML = `
-      <div class="score-list">
-        <h3>Latest Finish</h3>
-        ${standings}
+    els.raceConsole.innerHTML = `
+      <div class="race-console-card">
+        <p class="eyebrow">Race Console</p>
+        <h3>${escapeHtml(state.phase === "setup" ? "Start the race to open the question console." : state.feedback)}</h3>
+        <div class="info-card muted">Questions, answers, and review stay visible here for both racers while the map remains open.</div>
       </div>
-      <div class="info-card muted">This website version keeps results only for the current browser session.</div>
     `;
   }
 
   function renderLobby() {
-    els.lobbyCode.textContent = state.lobby.code || "No Race";
-    const readyCount = state.lobby.players.filter((player) => player.readyVersion === state.lobby.configVersion).length;
-    const scope = lobbySync.remote ? "server lobby" : "this device only";
-    els.lobbyStatus.textContent = state.lobby.active
-      ? `${readyCount}/${state.lobby.players.length} ready | ${scope}`
-      : `Create or join a race lobby. Scope: ${scope}.`;
-    els.readyRaceBtn.disabled = !state.lobby.active;
     const localPlayer = localLobbyPlayer();
-    els.readyRaceBtn.textContent = localPlayer && localPlayer.readyVersion === state.lobby.configVersion
-      ? "Ready ✓"
-      : "Ready";
-    els.startRaceBtn.disabled = state.lobby.active && !lobbyIsReady();
+    const hostControlsEnabled = !state.lobby.active || localIsHost();
+    els.lobbyCode.textContent = state.lobby.code || "No Race";
+    els.lobbyStatus.textContent = state.lobby.active
+      ? `${state.lobby.players.length} racer${state.lobby.players.length === 1 ? "" : "s"} attached to race ${state.lobby.code}.`
+      : "Create a race or open an existing one.";
+    els.startRaceBtn.disabled = !state.lobby.active || (localPlayer && !localPlayer.host);
 
     const lobbies = Object.values(readLobbyRegistry())
       .filter((lobby) => lobby && lobby.code)
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     els.availableLobbies.innerHTML = lobbies.length
       ? lobbies.map((lobby) => {
-        const ready = lobby.players.filter((player) => player.readyVersion === lobby.configVersion).length;
         return `
-          <button class="available-lobby${lobby.code === state.lobby.code ? " active" : ""}" type="button" data-code="${escapeHtml(lobby.code)}">
-            <strong>${escapeHtml(lobby.code)}</strong>
-            <span>${lobby.players.length}/4 players | ${ready}/${lobby.players.length} ready</span>
-          </button>
+          <div class="available-lobby${lobby.code === state.lobby.code ? " active" : ""}">
+            <button class="available-lobby-main" type="button" data-code="${escapeHtml(lobby.code)}">
+              <strong>${escapeHtml(lobby.code)}</strong>
+              <span>${lobby.players.length} racer${lobby.players.length === 1 ? "" : "s"} | ${escapeHtml(lobby.trackKey || "track pending")}</span>
+            </button>
+            <button class="ghost-btn danger available-lobby-delete" type="button" data-delete-code="${escapeHtml(lobby.code)}"${hostControlsEnabled ? "" : " disabled"}>Delete</button>
+          </div>
         `;
       }).join("")
-      : `<div class="info-card muted">No races are currently posted ${lobbySync.remote ? "on this server" : "in this browser"}.</div>`;
-    els.availableLobbies.querySelectorAll(".available-lobby").forEach((button) => {
-      const join = () => {
-        els.joinCode.value = button.dataset.code;
-        joinLobby();
-      };
-      button.addEventListener("dblclick", join);
+      : `<div class="info-card muted">No saved races are currently listed.</div>`;
+    els.availableLobbies.querySelectorAll(".available-lobby-main").forEach((button) => {
       button.addEventListener("click", () => {
         els.joinCode.value = button.dataset.code;
+        joinLobby();
+      });
+    });
+    els.availableLobbies.querySelectorAll(".available-lobby-delete").forEach((button) => {
+      button.addEventListener("click", () => {
+        deleteLobby(button.dataset.deleteCode);
       });
     });
 
     els.lobbyPlayers.innerHTML = state.lobby.players.length
       ? state.lobby.players.map((player) => {
-        const ready = player.readyVersion === state.lobby.configVersion;
         return `
-          <div class="lobby-player${ready ? " ready" : ""}">
+          <div class="lobby-player ready">
             <strong>${escapeHtml(player.name)}</strong>
-            <span>${player.host ? "Host" : "Player"} | ${ready ? "Ready" : "Not Ready"}</span>
+            <span>${player.host ? "Host" : "Player"}</span>
           </div>
         `;
       }).join("")
@@ -1574,15 +1897,36 @@
   }
 
   function render() {
+    const hostControlsEnabled = !state.lobby.active || localIsHost();
     applyTheme();
     document.body.dataset.phase = state.phase === "lobby" ? "lobby" : state.phase === "setup" ? "setup" : "race";
+    els.releaseNote.textContent = `Release ${APP_META.release} | rev ${APP_META.revision} | ${APP_META.label} | Updated ${APP_META.updatedOn}`;
+    els.newRaceBtn.hidden = state.phase === "race";
+    els.playerCount.disabled = !hostControlsEnabled;
+    els.humanCount.disabled = !hostControlsEnabled;
+    els.modeSelect.disabled = !hostControlsEnabled;
+    els.trackSelect.disabled = !hostControlsEnabled;
+    els.themeSelect.disabled = !hostControlsEnabled;
+    els.randomizeTrackBtn.disabled = !hostControlsEnabled;
+    els.closeRaceBtn.disabled = !state.lobby.active || !hostControlsEnabled;
+    els.newRaceBtn.disabled = state.lobby.active && !hostControlsEnabled;
+    renderAdminPanel();
     renderLobby();
     renderBoard();
     renderStatus();
     renderRoster();
-    renderPrompt();
+    renderActivityFeed();
+    renderRaceConsole();
     renderHazardLegend();
-    renderResults();
+  }
+
+  function styleForIndex(index) {
+    if (PLAYER_STYLES[index]) return PLAYER_STYLES[index];
+    const hue = (index * 47) % 360;
+    return {
+      name: `Car ${index + 1}`,
+      color: `hsl(${hue} 62% 52%)`,
+    };
   }
 
   function escapeHtml(value) {
@@ -1590,6 +1934,14 @@
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;");
+  }
+
+  function formatClock(timestamp) {
+    try {
+      return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "--:--";
+    }
   }
 
   window.addEventListener("error", (event) => {
@@ -1601,8 +1953,73 @@
   });
 
   function showError(message) {
-    els.promptTitle.textContent = "Error";
-    els.promptBody.innerHTML = `<div class="error-banner">${escapeHtml(message)}</div>`;
+    state.feedback = message;
+    renderRaceConsole(message);
+  }
+
+  async function closeCurrentRace() {
+    if (!state.lobby.active || !state.lobby.code) {
+      state.feedback = "No current race is open.";
+      render();
+      return;
+    }
+    const code = state.lobby.code;
+    if (!lobbySync.remote) {
+      await deleteLobby(code);
+      return;
+    }
+    try {
+      await postLobbyAction("close");
+      state.feedback = `Race ${code} closed.`;
+      render();
+    } catch (error) {
+      state.feedback = error.message;
+      render();
+    }
+  }
+
+  async function deleteLobby(code) {
+    if (!code) return;
+    if (lobbySync.remote) {
+      try {
+        const response = await fetch(`${LOBBY_API_URL}/${encodeURIComponent(code)}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) throw new Error(`Lobby delete returned ${response.status}`);
+        const payload = await response.json();
+        lobbySync.registry = payload && payload.lobbies && typeof payload.lobbies === "object"
+          ? payload.lobbies
+          : {};
+        lobbySync.lastError = "";
+        lobbySync.lastSyncAt = Date.now();
+      } catch (error) {
+        state.feedback = `Could not remove race ${code}. ${error && error.message ? error.message : "Delete failed."}`;
+        render();
+        return;
+      }
+    } else {
+      const registry = readLobbyRegistry();
+      delete registry[code];
+      writeLobbyRegistry(registry);
+    }
+
+    if (state.lobby.code === code) {
+      state.lobby = {
+        active: false,
+        code: "",
+        revision: 0,
+        configVersion: 0,
+        players: [],
+      };
+      state.phase = "lobby";
+      state.players = [];
+      state.placements = [];
+      state.review = null;
+      state.activityLog = [];
+      rebuildDriverConfig();
+    }
+    state.feedback = `Race ${code} removed.`;
+    render();
   }
 
   initControls();

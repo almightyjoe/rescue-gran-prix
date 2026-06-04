@@ -1,6 +1,6 @@
 {
   "name": "rescue-gran-prix",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Browser racing EMT training game with optional cross-device lobby server.",
   "type": "module",

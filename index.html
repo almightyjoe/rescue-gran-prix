@@ -4,25 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rescue Gran Prix</title>
-  <link rel="stylesheet" href="./styles.css?v=20260530-layout">
+  <link rel="stylesheet" href="./styles.css?v=20260604-v1">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div>
+      <div class="title-block">
         <p class="eyebrow">Browser Racing EMT Training Game</p>
         <h1>Rescue Gran Prix</h1>
+        <p id="release-note" class="release-note"></p>
       </div>
-      <section class="panel prompt-panel">
-        <div class="panel-header compact">
-          <h2 id="prompt-title">Ready</h2>
-        </div>
-        <div id="prompt-body" class="prompt-body"></div>
-        <div id="move-controls" class="move-controls"></div>
-        <div id="answer-controls" class="answer-controls"></div>
-      </section>
       <div class="topbar-actions">
         <button id="new-race-btn" class="ghost-btn">New Race</button>
+        <button id="admin-toggle-btn" class="ghost-btn">Admin</button>
+      </div>
+      <div id="admin-panel" class="admin-panel topbar-admin" hidden>
+        <div class="setup-actions admin-actions">
+          <button id="randomize-track-btn" class="ghost-btn">Randomize Hazards</button>
+          <button id="close-race-btn" class="ghost-btn danger">Close Current Race</button>
+        </div>
       </div>
     </header>
 
@@ -30,7 +30,7 @@
       <section class="panel lobby-panel">
         <div class="panel-header">
           <h2>Race Lobby</h2>
-          <p>Create a race, invite players, and start when everyone is ready.</p>
+          <p>Create, reopen, or rejoin a remote multiplayer race and keep every connected browser in sync.</p>
         </div>
 
         <div class="lobby-grid">
@@ -47,7 +47,6 @@
         <div class="setup-actions">
           <button id="create-race-btn" class="primary-btn">Create Race</button>
           <button id="join-race-btn" class="ghost-btn">Join Race</button>
-          <button id="ready-race-btn" class="ghost-btn">Ready</button>
         </div>
 
         <div class="lobby-summary">
@@ -100,20 +99,26 @@
 
         <div class="setup-actions">
           <button id="start-race-btn" class="primary-btn">Start Race</button>
-          <button id="randomize-track-btn" class="ghost-btn">Randomize Hazards</button>
         </div>
       </section>
 
       <section class="panel board-panel">
         <div class="panel-header">
           <h2>Track View</h2>
-          <p>Pick a distance, answer the EMT question, and race through hazards.</p>
+          <p>The track stays visible while questions, answers, and review stay live in the right-side console.</p>
         </div>
         <div id="board-stage" class="board-stage"></div>
         <section class="map-hazard-panel">
           <h2>Hazards</h2>
           <div id="hazard-legend" class="hazard-legend"></div>
         </section>
+      </section>
+
+      <section class="panel race-console-panel">
+        <div class="panel-header compact">
+          <h2>Question Console</h2>
+        </div>
+        <div id="race-console" class="race-console" aria-live="polite"></div>
       </section>
 
       <aside class="sidebar">
@@ -131,12 +136,13 @@
           <div id="driver-roster" class="driver-roster"></div>
         </section>
 
-        <section class="panel results-panel">
+        <section class="panel activity-panel">
           <div class="panel-header compact">
-            <h2>Race Results</h2>
+            <h2>Race Feed</h2>
           </div>
-          <div id="results-body" class="results-body"></div>
+          <div id="activity-feed" class="activity-feed"></div>
         </section>
+
       </aside>
     </main>
   </div>
@@ -166,6 +172,6 @@
   </template>
 
   <script src="./questions.js?v=20260601-rescue"></script>
-  <script src="./app.js?v=20260601-server-lobby"></script>
+  <script src="./app.js?v=20260604-v1"></script>
 </body>
 </html>

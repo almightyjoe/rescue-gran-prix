@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Rescue Gran Prix Monitor
+Exec=/usr/bin/bash /home/joe/rescue_gran_prix/desktop-widget/launch.sh
+Icon=utilities-system-monitor
+Comment=Monitor the Rescue Gran Prix service and lobby activity
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=false
