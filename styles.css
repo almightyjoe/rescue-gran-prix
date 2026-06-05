@@ -1081,3 +1081,70 @@ body[data-phase="race"] .status-summary {
     justify-content: start;
   }
 }
+
+:root[data-theme="midnight"] :where(
+  .info-card,
+  .driver-row,
+  .driver-card,
+  .hazard-row,
+  .activity-entry,
+  .race-console-card,
+  .answer-option,
+  .answer-review,
+  .case-context,
+  .source-ref,
+  .score-list,
+  .badge,
+  .theme-picker,
+  .theme-choice,
+  .available-lobby,
+  .available-lobby-main,
+  .ghost-btn,
+  input,
+  select
+) {
+  color: #17212b;
+}
+
+:root[data-theme="midnight"] :where(
+  .info-card .muted,
+  .driver-meta,
+  .muted,
+  .activity-time,
+  .source-ref,
+  .race-console-meta span,
+  .theme-picker > span,
+  .hazard-row .muted,
+  .answer-review p,
+  .race-console-card .eyebrow
+) {
+  color: #526273;
+}
+
+:root[data-theme="midnight"] .race-console-card .eyebrow {
+  color: #526273;
+}
+
+:root[data-theme="midnight"] :where(
+  .race-console-card h3,
+  .race-console-card strong,
+  .answer-review strong,
+  .case-context,
+  .activity-entry div:last-child,
+  .driver-row-title,
+  .hazard-row strong
+) {
+  color: #17212b;
+}
+
+:root[data-theme="midnight"] .answer-option span,
+:root[data-theme="midnight"] .primary-btn,
+:root[data-theme="midnight"] .hazard-token {
+  color: #fff9f4;
+}
+
+:root[data-theme="midnight"] .error-banner,
+:root[data-theme="midnight"] .ghost-btn.danger,
+:root[data-theme="midnight"] .utility-btn.danger {
+  color: #7d2323;
+}
