@@ -340,6 +340,7 @@
     modeSelect: document.querySelector("#mode-select"),
     trackSelect: document.querySelector("#track-select"),
     themeSelect: document.querySelector("#theme-select"),
+    themeButtons: [...document.querySelectorAll("[data-theme-choice]")],
     driverConfig: document.querySelector("#driver-config"),
     startRaceBtn: document.querySelector("#start-race-btn"),
     newRaceBtn: document.querySelector("#new-race-btn"),
@@ -515,7 +516,7 @@
     els.humanCount.value = String(state.config.humans);
     els.modeSelect.value = String(state.config.mode);
     els.trackSelect.value = state.config.track;
-    els.themeSelect.value = state.config.theme;
+    syncThemeControls();
 
     els.playerCount.addEventListener("change", () => {
       state.config.players = Number(els.playerCount.value);
@@ -559,13 +560,10 @@
     });
 
     els.themeSelect.addEventListener("change", () => {
-      state.config.theme = els.themeSelect.value;
-      invalidateLobbyReady();
-      applyTheme();
-      if (state.lobby.active && lobbySync.remote) {
-        syncLobbySetup().catch((error) => showError(error.message));
-      }
-      render();
+      updateTheme(els.themeSelect.value);
+    });
+    els.themeButtons.forEach((button) => {
+      button.addEventListener("click", () => updateTheme(button.dataset.themeChoice));
     });
 
     els.createRaceBtn.addEventListener("click", createLobby);
@@ -986,7 +984,7 @@
       els.humanCount.value = String(state.config.humans);
       els.modeSelect.value = String(state.config.mode);
       els.trackSelect.value = state.config.track;
-      els.themeSelect.value = state.config.theme;
+      syncThemeControls();
       state.track = buildTrackInstance(state.config.track, lobby.trackKey);
       if (lobby.hazards) {
         state.track.hazards = cloneHazards(lobby.hazards);
@@ -1039,8 +1037,29 @@
     return Object.entries(hazards || {}).map(([type, space]) => ({ type, space }));
   }
 
+  function syncThemeControls() {
+    els.themeSelect.value = state.config.theme;
+    els.themeButtons.forEach((button) => {
+      const active = button.dataset.themeChoice === state.config.theme;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function updateTheme(theme) {
+    state.config.theme = String(theme || "sand");
+    syncThemeControls();
+    invalidateLobbyReady();
+    applyTheme();
+    if (state.lobby.active && lobbySync.remote) {
+      syncLobbySetup().catch((error) => showError(error.message));
+    }
+    render();
+  }
+
   function applyTheme() {
     const root = document.documentElement;
+    root.dataset.theme = state.config.theme;
     if (state.config.theme === "midnight") {
       root.style.setProperty("--bg", "#16202a");
       root.style.setProperty("--bg-accent", "#202f3b");
@@ -1063,7 +1082,19 @@
       root.style.setProperty("--road-edge", "#f4f5ef");
       root.style.setProperty("--highlight", "#bb5a42");
       root.style.setProperty("--track-bg", "linear-gradient(180deg, #c7d0be 0%, #b8c4af 100%)");
+    } else if (state.config.theme === "sunset") {
+      root.style.setProperty("--bg", "#ead8c6");
+      root.style.setProperty("--bg-accent", "#fff3dd");
+      root.style.setProperty("--panel", "rgba(255, 250, 239, 0.92)");
+      root.style.setProperty("--panel-border", "#7a4d58");
+      root.style.setProperty("--text", "#3d2d32");
+      root.style.setProperty("--muted", "#746269");
+      root.style.setProperty("--road", "#6a6266");
+      root.style.setProperty("--road-edge", "#fff3e9");
+      root.style.setProperty("--highlight", "#c85644");
+      root.style.setProperty("--track-bg", "linear-gradient(180deg, #f1b47e 0%, #d48a79 100%)");
     } else {
+      root.dataset.theme = "sand";
       root.style.removeProperty("--bg");
       root.style.removeProperty("--bg-accent");
       root.style.removeProperty("--panel");
@@ -1899,6 +1930,7 @@
   function render() {
     const hostControlsEnabled = !state.lobby.active || localIsHost();
     applyTheme();
+    syncThemeControls();
     document.body.dataset.phase = state.phase === "lobby" ? "lobby" : state.phase === "setup" ? "setup" : "race";
     els.releaseNote.textContent = `Release ${APP_META.release} | rev ${APP_META.revision} | ${APP_META.label} | Updated ${APP_META.updatedOn}`;
     els.newRaceBtn.hidden = state.phase === "race";
@@ -1907,6 +1939,9 @@
     els.modeSelect.disabled = !hostControlsEnabled;
     els.trackSelect.disabled = !hostControlsEnabled;
     els.themeSelect.disabled = !hostControlsEnabled;
+    els.themeButtons.forEach((button) => {
+      button.disabled = !hostControlsEnabled;
+    });
     els.randomizeTrackBtn.disabled = !hostControlsEnabled;
     els.closeRaceBtn.disabled = !state.lobby.active || !hostControlsEnabled;
     els.newRaceBtn.disabled = state.lobby.active && !hostControlsEnabled;

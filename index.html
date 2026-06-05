@@ -16,7 +16,7 @@
       </div>
       <div class="topbar-actions">
         <button id="new-race-btn" class="ghost-btn">New Race</button>
-        <a class="ghost-btn feedback-btn" href="mailto:nightprowler@rocketmail.com?subject=Rescue%20Gran%20Prix%20Bug%20Report&body=Please%20describe%20what%20happened%2C%20what%20you%20expected%2C%20and%20which%20device%2Fbrowser%20you%20were%20using.%0A%0ARace%20code%20if%20available%3A%0A%0ASteps%20to%20reproduce%3A">Report Bug</a>
+        <a class="ghost-btn feedback-btn" href="mailto:nightprowler@rocketmail.com?subject=rescue_gran_prix&body=Please%20describe%20what%20happened%2C%20what%20you%20expected%2C%20and%20which%20device%2Fbrowser%20you%20were%20using.%0A%0ARace%20code%20if%20available%3A%0A%0ASteps%20to%20reproduce%3A">Report Bug</a>
         <button id="admin-toggle-btn" class="ghost-btn">Admin</button>
       </div>
       <div id="admin-panel" class="admin-panel topbar-admin" hidden>
@@ -48,6 +48,16 @@
         <div class="setup-actions">
           <button id="create-race-btn" class="primary-btn">Create Race</button>
           <button id="join-race-btn" class="ghost-btn">Join Race</button>
+        </div>
+
+        <div class="theme-picker" aria-label="Display theme">
+          <span>Display Theme</span>
+          <div class="theme-options">
+            <button type="button" class="theme-choice" data-theme-choice="sand">Light Mode</button>
+            <button type="button" class="theme-choice" data-theme-choice="midnight">Dark Mode</button>
+            <button type="button" class="theme-choice" data-theme-choice="forest">Forest Mode</button>
+            <button type="button" class="theme-choice" data-theme-choice="sunset">Sunset Mode</button>
+          </div>
         </div>
 
         <div class="lobby-summary">
@@ -89,9 +99,10 @@
           <label>
             <span>Theme</span>
             <select id="theme-select">
-              <option value="sand">Sand</option>
-              <option value="midnight">Midnight</option>
-              <option value="forest">Forest</option>
+              <option value="sand">Light Mode</option>
+              <option value="midnight">Dark Mode</option>
+              <option value="forest">Forest Mode</option>
+              <option value="sunset">Sunset Mode</option>
             </select>
           </label>
         </div>
